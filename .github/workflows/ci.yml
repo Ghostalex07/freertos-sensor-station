@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  build-fetchcontent:
+    name: build-fetchcontent (kernel via FetchContent, con red)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: cmake --version && gcc --version
+
+      # Cachea el clon de FreeRTOS-Kernel que descarga FetchContent en
+      # build/_deps (localizacion por defecto) para reutilizarlo entre runs.
+      # La clave lleva el tag para nunca restaurar un kernel de otra version.
+      - name: Cache FetchContent (build/_deps)
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: fetchcontent-V11.3.1-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchcontent-V11.3.1-${{ runner.os }}-
+
+      - name: Configure (FetchContent, con red)
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Smoke test
+        run: |
+          rc=0
+          timeout -k 1 6 ./build/sensor_station </dev/null > out.log 2>&1 || rc=$?
+          echo "exit code: $rc (124 = terminado por timeout = esperado)"
+          cat out.log
+          if [ "$rc" -ne 124 ] && [ "$rc" -ne 0 ]; then
+            echo "::error::sensor_station termino con codigo inesperado: $rc"
+            exit 1
+          fi
+          if ! grep -q "temperatura" out.log; then
+            echo "::error::'temperatura' no aparece en la salida"
+            exit 1
+          fi
+          if ! grep -q "stats:" out.log; then
+            echo "::error::'stats:' no aparece en la salida"
+            exit 1
+          fi
+          echo "Smoke test OK"
+
+  build-kernel-local:
+    name: build-kernel-local (kernel local, sin red)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout FreeRTOS-Kernel V11.3.1
+        uses: actions/checkout@v4
+        with:
+          repository: FreeRTOS/FreeRTOS-Kernel
+          ref: V11.3.1
+          path: kernel
+
+      - name: Toolchain versions
+        run: cmake --version && gcc --version
+
+      - name: Configure (kernel local, sin FetchContent)
+        run: cmake -S . -B build -DFREERTOS_KERNEL_PATH="${{ github.workspace }}/kernel"
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Smoke test
+        run: |
+          rc=0
+          timeout -k 1 6 ./build/sensor_station </dev/null > out.log 2>&1 || rc=$?
+          echo "exit code: $rc (124 = terminado por timeout = esperado)"
+          cat out.log
+          if [ "$rc" -ne 124 ] && [ "$rc" -ne 0 ]; then
+            echo "::error::sensor_station termino con codigo inesperado: $rc"
+            exit 1
+          fi
+          if ! grep -q "temperatura" out.log; then
+            echo "::error::'temperatura' no aparece en la salida"
+            exit 1
+          fi
+          if ! grep -q "stats:" out.log; then
+            echo "::error::'stats:' no aparece en la salida"
+            exit 1
+          fi
+          echo "Smoke test OK"

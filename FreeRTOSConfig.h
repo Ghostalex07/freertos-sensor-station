@@ -339,7 +339,7 @@
  * function for any set to 1.  See https://www.freertos.org/a00016.html. */
 #define configUSE_IDLE_HOOK                   0
 #define configUSE_TICK_HOOK                   0
-#define configUSE_MALLOC_FAILED_HOOK          0
+#define configUSE_MALLOC_FAILED_HOOK          1
 #define configUSE_DAEMON_TASK_STARTUP_HOOK    0
 
 /* Set configUSE_SB_COMPLETED_CALLBACK to 1 to have send and receive completed
@@ -373,20 +373,39 @@
  * application writer needs to provide a clock source if set to 1.  Defaults to
  * 0 if left undefined.  See https://www.freertos.org/rtos-run-time-stats.html.
  */
-#define configGENERATE_RUN_TIME_STATS           0
+#define configGENERATE_RUN_TIME_STATS           1
+
+#include <stdint.h>
+
+/* High resolution (1us) run time counter.  The POSIX port provides its own
+ * portGET_RUN_TIME_COUNTER_VALUE() based on times() which only has 10ms
+ * granularity - too coarse for this demo.  When this macro is defined the
+ * kernel uses it instead, for both total run time and per task accounting.
+ * The helper latches the base time on first call so the counter starts at 0
+ * instead of using the raw CLOCK_MONOTONIC uptime (which would overflow
+ * uint32_t), and there is a single shared base for every reader.
+ */
+extern uint64_t ulPortGetAltMicros( void );
+
+#define portALT_GET_RUN_TIME_COUNTER_VALUE( ulCounter )                \
+    do                                                                 \
+    {                                                                  \
+        ( ulCounter ) = ( configRUN_TIME_COUNTER_TYPE )                \
+            ulPortGetAltMicros();                                      \
+    } while( 0 )
 
 /* Set configUSE_TRACE_FACILITY to include additional task structure members
  * are used by trace and visualisation functions and tools.  Set to 0 to exclude
  * the additional information from the structures. Defaults to 0 if left
  * undefined. */
-#define configUSE_TRACE_FACILITY                0
+#define configUSE_TRACE_FACILITY                1
 
 /* Set to 1 to include the vTaskList() and vTaskGetRunTimeStats() functions in
  * the build.  Set to 0 to exclude these functions from the build.  These two
  * functions introduce a dependency on string formatting functions that would
  * otherwise not exist - hence they are kept separate.  Defaults to 0 if left
  * undefined. */
-#define configUSE_STATS_FORMATTING_FUNCTIONS    0
+#define configUSE_STATS_FORMATTING_FUNCTIONS    1
 
 /******************************************************************************/
 /* Co-routine related definitions. ********************************************/
@@ -416,14 +435,18 @@
  * )" or it can simple disable interrupts and sit in a loop to halt all
  * execution on the failing line for viewing in a debugger. */
 
+extern void vAssertCalled( const char * pcFile,
+                           int iLine );
+
 /* *INDENT-OFF* */
-#define configASSERT( x )         \
-    if( ( x ) == 0 )              \
-    {                             \
-        taskDISABLE_INTERRUPTS(); \
-        for( ; ; )                \
-        ;                         \
-    }
+#define configASSERT( x )                    \
+    do                                       \
+    {                                        \
+        if( ( x ) == 0 )                     \
+        {                                    \
+            vAssertCalled( __FILE__, __LINE__ ); \
+        }                                    \
+    } while( 0 )
 /* *INDENT-ON* */
 
 /******************************************************************************/

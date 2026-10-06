@@ -4,8 +4,8 @@ project(freertos_sensor_station C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-set(FREERTOS_HEAP "4" CACHE STRING "" FORCE)
-set(FREERTOS_PORT "GCC_POSIX" CACHE STRING "" FORCE)
+set(FREERTOS_HEAP "4" CACHE STRING "")
+set(FREERTOS_PORT "GCC_POSIX" CACHE STRING "")
 
 add_library(freertos_config INTERFACE)
 target_include_directories(freertos_config INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -28,4 +28,5 @@ endif()
 
 add_executable(sensor_station main.c)
 target_compile_options(sensor_station PRIVATE -Wall -Wextra)
+target_compile_definitions(sensor_station PRIVATE _DEFAULT_SOURCE)
 target_link_libraries(sensor_station freertos_kernel freertos_config Threads::Threads)
