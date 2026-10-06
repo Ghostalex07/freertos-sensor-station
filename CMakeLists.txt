@@ -1,0 +1,31 @@
+cmake_minimum_required(VERSION 3.15)
+project(freertos_sensor_station C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+set(FREERTOS_HEAP "4" CACHE STRING "" FORCE)
+set(FREERTOS_PORT "GCC_POSIX" CACHE STRING "" FORCE)
+
+add_library(freertos_config INTERFACE)
+target_include_directories(freertos_config INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+find_package(Threads REQUIRED)
+
+if(DEFINED FREERTOS_KERNEL_PATH)
+    get_filename_component(FREERTOS_KERNEL_PATH "${FREERTOS_KERNEL_PATH}" ABSOLUTE)
+    message(STATUS "Usando kernel local: ${FREERTOS_KERNEL_PATH}")
+    add_subdirectory("${FREERTOS_KERNEL_PATH}" freertos-kernel)
+else()
+    include(FetchContent)
+    FetchContent_Declare(freertos_kernel
+        GIT_REPOSITORY https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+        GIT_TAG        V11.3.1
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(freertos_kernel)
+endif()
+
+add_executable(sensor_station main.c)
+target_compile_options(sensor_station PRIVATE -Wall -Wextra)
+target_link_libraries(sensor_station freertos_kernel freertos_config Threads::Threads)
