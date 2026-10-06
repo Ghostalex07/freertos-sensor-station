@@ -1,6 +1,10 @@
 # Estación de sensores con FreeRTOS
 
+[![CI](https://github.com/Ghostalex07/freertos-sensor-station/actions/workflows/ci.yml/badge.svg)](https://github.com/Ghostalex07/freertos-sensor-station/actions/workflows/ci.yml)
+
 Demo educativa de **FreeRTOS** que simula una estación de sensores de temperatura y humedad, corriendo en **Linux** sobre el puerto `GCC_POSIX` (las tareas FreeRTOS se ejecutan como hilos `pthread`, sin necesidad de placa ni emulador).
+
+![Demo con dashboard, alarma y sparklines](docs/demo.gif)
 
 ## Características destacadas
 
@@ -8,9 +12,14 @@ Demo educativa de **FreeRTOS** que simula una estación de sensores de temperatu
 - 📡 **Pipeline clásico de RTOS**: sensores → cola → monitor → semáforo → tarea de alarma → event group.
 - ⏱️ **Periodicidad garantizada** con `vTaskDelayUntil` (no se acumula deriva).
 - ⌨️ **Interfaz interactiva** por stdin en modo terminal raw: inyectar picos, pausar sensores, reiniciar contadores.
-- 🖥️ **Dashboard interactivo** en terminal (tecla `d`): barras de temperatura/humedad/cola/heap y **CPU % por tarea** gracias a `uxTaskGetSystemState` y *run-time stats* con resolución de 1 µs.
+- 🖥️ **Dashboard interactivo** en terminal (tecla `d`): barras de temperatura/humedad/cola/heap, **CPU % por tarea** (`uxTaskGetSystemState` + run-time stats a 1 µs) y **sparklines** con las últimas 32 lecturas.
 - 📊 **Telemetría propia**: heap libre, nº de tareas, mínimo de pila y ocupación de CPU cada 5 s.
+- 📝 **Logging CSV**: la tarea `logger` escribe `readings.csv` (cada lectura) y `events.csv` (alarmas, watchdog, eventos) a través de un **stream buffer** y un **message buffer**.
+- 🐕 **Watchdog por software**: vigila el latido de las 7 tareas; si una supera su timeout lo reporta como evento (pásala con `w` para verlo en acción).
+- 🌐 **Endpoint HTTP**: servidor JSON mínimo en `127.0.0.1:8080/metrics` con estado, CPU %, heap, watchdog y última lectura (`curl` para verlo).
 - 🛑 **Salida limpia con señales**: `SIGINT`, `SIGTERM` y `SIGHUP` terminan la demo ordenadamente (también con stdin cerrado).
+- 🔀 **Stream/message buffers**: binario para lecturas (stream) y texto para eventos (message buffer), ambos primitivas reales de FreeRTOS.
+- 🎲 **Semilla reproducible**: `SENSOR_STATION_SEED=42 ./build/sensor_station` genera lecturas deterministas (útil en CI).
 - 🔧 **Configuración centralizada** en `FreeRTOSConfig.h` y en la cabecera de `main.c`.
 - 🏗️ **Build con CMake**: descarga el kernel con `FetchContent` o usa uno local con `-DFREERTOS_KERNEL_PATH`.
 
@@ -61,6 +70,7 @@ Pulsa las teclas mientras la aplicación está en ejecución. Si stdout es una *
 | `c` | Reanuda los sensores |
 | `r` | Reinicia el contador de alarmas |
 | `d` | Alterna entre modo dashboard y modo línea (solo con terminal) |
+| `w` | Telemetría de watchdog: suspende/reanuda `monitor` para ver la detección de «sin latido» y la recuperación |
 | `q` | Sale limpia de la aplicación |
 | `?` | Muestra la ayuda |
 
@@ -111,6 +121,10 @@ Pulsa las teclas mientras la aplicación está en ejecución. Si stdout es una *
   │  (o 500 ms     │        └──────────────────────────────┘
   │   dashboard)   │        CPU% por tarea: uxTaskGetSystemState
   └────────────────┘
+  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
+  │  logger (CSV)  │  │  watchdog      │  │  http (8080)   │
+  │  stream+msgbuf │  │  latido x7     │  │  JSON metrics  │
+  └────────────────┘  └────────────────┘  └────────────────┘
 ```
 
 ### Primitivas de FreeRTOS utilizadas
@@ -124,9 +138,42 @@ Pulsa las teclas mientras la aplicación está en ejecución. Si stdout es una *
 | **Semáforo contador** | `xSemaphoreCreateCounting` | Cuenta las lecturas descartadas cuando la cola está llena; `stats` las consume. |
 | **Notificación de tareas** | `xTaskNotifyGive`, `xTaskNotifyWait` | Despierta al instante a la tarea `stats` para redibujar el dashboard. |
 | **Timer de software** | `xTimerCreate` | Cada 10 s inyecta un pico de temperatura que provoca alarma. |
-| **Gestión de tareas** | `xTaskCreate`, bandera `xSensorsPaused` | Crea las 6 tareas; `p`/`c` pausan los sensores con una bandera (sin bloquear tareas). |
+| **Gestión de tareas** | `xTaskCreate`, bandera `xSensorsPaused` | Crea las 9 tareas; `p`/`c` pausan los sensores con una bandera (sin bloquear tareas). |
 | **Periodicidad** | `vTaskDelayUntil` | Los sensores se ejecutan cada 700 ms / 1100 ms sin deriva. |
 | **Diagnóstico** | `xPortGetFreeHeapSize`, `uxTaskGetStackHighWaterMark`, `uxTaskGetSystemState` | La tarea `stats` reporta heap, pila mínima y CPU % por tarea (*run-time stats*). |
+| **Stream buffer** | `xStreamBufferCreate`, `xStreamBufferSend`, `xStreamBufferReceive` | Binario de lecturas sensor→logger; el monitor envía cada muestra y `logger` vuelca `readings.csv`. |
+| **Message buffer** | `xMessageBufferCreate`, `xMessageBufferSend`, `xMessageBufferReceive` | Texto de eventos (alarmas, watchdog, http…) hacia `events.csv`. |
+| **Sockets POSIX** | `socket`, `accept`, `send` | La tarea `http` expone `127.0.0.1:8080/metrics` en JSON (fuera del kernel, estilo LWIP). |
+
+---
+
+## Observabilidad
+
+### CSV (`logger`)
+
+| Fichero | Contenido |
+| --- | --- |
+| `readings.csv` | `epoch_ms,sensor,valor,secuencia,alarma` — cada lectura que pasa por el monitor. |
+| `events.csv` | `epoch_ms,evento` — alarmas, watchdog, eventos HTTP, arranque y apagado. |
+
+### HTTP (`http`)
+
+```bash
+curl http://127.0.0.1:8080/metrics
+# {"uptime_s":2,"estado":"normal","alarmas":0,"lecturas":6,...,"watchdog":"ok",...}
+```
+
+Se cierra solo al recibir la respuesta (sin `keep-alive`) y usa `MSG_DONTWAIT` para no bloquear el planificador.
+
+### Watchdog
+
+Cada tarea latida con `vWatchdogBeat()`; la tarea `watchdog` compara con timeouts propios (5 s, 8 s para `stats`). Pasa `w` para suspender `monitor` y ver el evento `sin latido` + `recupero el latido`.
+
+### Semilla reproducible
+
+```bash
+SENSOR_STATION_SEED=42 ./build/sensor_station   # lecturas idénticas en cada run
+```
 
 ---
 
@@ -168,13 +215,14 @@ Ordenados de fácil a difícil:
 
 ```
 freertos-sensor-station/
-├── .github/workflows/ci.yml  # CI: build local + FetchContent y smoke test
+├── .github/workflows/ci.yml  # CI: build local + FetchContent + ASan y smoke test
 ├── CMakeLists.txt        # Build: FetchContent del kernel o ruta local
 ├── FreeRTOSConfig.h      # Configuración de FreeRTOS (heap, pila, tick…)
 ├── LICENSE               # MIT
 ├── README.md             # Este archivo
 ├── .gitignore
-└── main.c                # Tareas, colas, semáforos, timers, dashboard y controles
+├── docs/demo.gif         # Captura del dashboard en marcha
+└── main.c                # Tareas, colas, buffers, watchdog, http, dashboard y controles
 ```
 
 ---

@@ -101,3 +101,50 @@ jobs:
             exit 1
           fi
           echo "Smoke test OK"
+
+  build-asan:
+    name: build-asan (kernel local, ASan + UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout FreeRTOS-Kernel V11.3.1
+        uses: actions/checkout@v4
+        with:
+          repository: FreeRTOS/FreeRTOS-Kernel
+          ref: V11.3.1
+          path: kernel
+
+      - name: Configure (ASan + UBSan)
+        run: >
+          cmake -S . -B build
+          -DFREERTOS_KERNEL_PATH="${{ github.workspace }}/kernel"
+          -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Smoke test instrumentado
+        env:
+          SENSOR_STATION_SEED: "42"
+        run: |
+          rc=0
+          timeout -k 1 6 ./build/sensor_station </dev/null > out.log 2>&1 || rc=$?
+          echo "exit code: $rc (124 = terminado por timeout = esperado)"
+          cat out.log
+          if [ "$rc" -ne 124 ] && [ "$rc" -ne 0 ]; then
+            echo "::error::sensor_station termino con codigo inesperado: $rc"
+            exit 1
+          fi
+          if grep -qE "ERROR: |runtime error|SUMMARY: " out.log; then
+            echo "::error::informes de ASan/UBSan en la salida"
+            exit 1
+          fi
+          if ! grep -q "temperatura" out.log; then
+            echo "::error::'temperatura' no aparece en la salida"
+            exit 1
+          fi
+          echo "ASan smoke test OK"
