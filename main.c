@@ -21,6 +21,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "logic.h"
+
 #define SENSOR_QUEUE_LENGTH    8
 #define TEMP_ALARM_THRESHOLD   40
 #define HUM_ALARM_THRESHOLD    85
@@ -50,6 +52,23 @@
 #define EVENT_BUFFER_SIZE      96
 #define CPU_BAR_WIDTH          24
 #define VALUE_BAR_WIDTH        28
+
+#define SLOW_CONSUMER_MS       2000
+#define PRIORITY_DEMO_MS       5000
+#define CSV_ROTATE_BYTES       ( 64 * 1024 )
+#define INV_WORK_ITERS         5000
+#define INV_MED_MS             1000
+
+#define SYNC_TEMP_BIT          ( 1 << 0 )
+#define SYNC_HUM_BIT           ( 1 << 1 )
+
+#define INV_LOW_GO             ( 1 << 0 )
+#define INV_MED_GO             ( 1 << 1 )
+#define INV_HIGH_GO            ( 1 << 2 )
+#define INV_HELD               ( 1 << 3 )
+#define INV_MED_DONE           ( 1 << 4 )
+#define INV_HIGH_DONE          ( 1 << 5 )
+#define INV_ALL_CLEAR          ( INV_HELD | INV_MED_DONE | INV_HIGH_DONE )
 
 #define PRIORITY_ALARM         4
 #define PRIORITY_MONITOR       3
@@ -128,15 +147,26 @@ typedef struct
     int aiHumHistory[ SPARK_HISTORY ];
     unsigned int uiTempHistNext;
     unsigned int uiHumHistNext;
+    unsigned long ulCpuTempX10;
+    unsigned long ulCpuHumX10;
+    unsigned long ulCpuMonitorX10;
+    unsigned long ulCpuAlarmX10;
     char pcLastEvent[ EVENT_BUFFER_SIZE ];
 } SystemState_t;
 
 static QueueHandle_t xSensorQueue;
+static QueueHandle_t xTempLatestQueue;
+static QueueHandle_t xHumLatestQueue;
+static QueueHandle_t xAggSet;
 static SemaphoreHandle_t xPrintMutex;
 static SemaphoreHandle_t xStateMutex;
 static SemaphoreHandle_t xAlarmSemaphore;
 static SemaphoreHandle_t xDropSemaphore;
+static SemaphoreHandle_t xInvBinary;
+static SemaphoreHandle_t xInvMutex;
 static EventGroupHandle_t xEventGroup;
+static EventGroupHandle_t xSyncGroup;
+static EventGroupHandle_t xInvEvents;
 static StreamBufferHandle_t xReadingStream;
 static MessageBufferHandle_t xEventMessage;
 
@@ -151,11 +181,25 @@ static TaskHandle_t xCommandTaskHandle;
 static TaskHandle_t xLoggerTaskHandle;
 static TaskHandle_t xWatchdogTaskHandle;
 static TaskHandle_t xHttpTaskHandle;
+static TaskHandle_t xAggregatorTaskHandle;
+static TaskHandle_t xSyncTaskHandle;
+static TaskHandle_t xInvLowTaskHandle;
+static TaskHandle_t xInvMedTaskHandle;
+static TaskHandle_t xInvHighTaskHandle;
+
+static StackType_t xLoggerStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xLoggerTcb;
 
 static volatile sig_atomic_t xShutdownRequested = 0;
 static volatile BaseType_t xDashboardEnabled = pdFALSE;
 static volatile BaseType_t xMonitorHangDemo = pdFALSE;
 static volatile BaseType_t xHttpEnabled = pdFALSE;
+static volatile BaseType_t xSlowConsumer = pdFALSE;
+static volatile BaseType_t xMonitorPrioDemo = pdFALSE;
+static volatile BaseType_t xInvDemoRunning = pdFALSE;
+static volatile int iInvPhase = 0;
+static volatile int iInvDtMs[ 2 ];
+static volatile TickType_t xPrioDemoDeadline = 0;
 static volatile TickType_t xWatchdogBeat[ WD_COUNT ];
 static volatile BaseType_t xWatchdogFlagged[ WD_COUNT ];
 static const TickType_t xWatchdogTimeout[ WD_COUNT ] =
@@ -200,10 +244,12 @@ static BaseType_t xStdinClosed = pdFALSE;
 static unsigned int uiSpikeSeed = 1;
 
 static const char * pcHelpText =
-    "teclas: [t]=temp alarma [h]=hum alarma [p]=pausa [c]=continua [r]=reset [d]=dashboard [w]=vigia [q]=salir";
+    "teclas: [t]=temp alarma [h]=hum alarma [p]=pausa [c]=continua [r]=reset [d]=dashboard\n"
+    "        [w]=vigia [i]=inversion [v]=prioridad [k]=presion [s]=tareas [q]=salir [?]=ayuda";
 
 static const char * pcHelpDashboard =
-    "[t] temp  [h] hum  [p] pausa  [c] sigue  [r] reset  [d] lineas  [w] vigia  [q] salir";
+    "[t] alarma  [p] pausa  [c] sigue  [r] reset  [d] lineas  [w] vigia\n"
+    "        [i] inversion  [v] prioridad  [k] presion  [s] tareas  [q] salir";
 
 static const SensorConfig_t xTempSensor =
 {
@@ -411,66 +457,6 @@ static void vFormatUptime( char * pcBuffer,
                        ulSeconds % 60UL );
 }
 
-static void vFormatBar( char * pcBuffer,
-                        size_t xBufferSize,
-                        unsigned int uiPercent,
-                        unsigned int uiWidth )
-{
-    unsigned int uiFilled;
-    unsigned int uiIndex;
-
-    if( uiPercent > 100U )
-    {
-        uiPercent = 100U;
-    }
-
-    if( uiWidth >= xBufferSize )
-    {
-        uiWidth = ( unsigned int ) ( xBufferSize - 1U );
-    }
-
-    uiFilled = ( uiPercent * uiWidth ) / 100U;
-
-    for( uiIndex = 0U; uiIndex < uiFilled; uiIndex++ )
-    {
-        pcBuffer[ uiIndex ] = '#';
-    }
-
-    for( ; uiIndex < uiWidth; uiIndex++ )
-    {
-        pcBuffer[ uiIndex ] = '-';
-    }
-
-    pcBuffer[ uiIndex ] = '\0';
-}
-
-static unsigned int uiClampPercent( int iValue,
-                                    int iMaximum )
-{
-    unsigned int uiPercent;
-
-    if( iValue <= 0 )
-    {
-        return 0U;
-    }
-
-    if( iValue >= iMaximum )
-    {
-        return 100U;
-    }
-
-    uiPercent = ( unsigned int ) ( ( iValue * 100 ) / iMaximum );
-
-    return uiPercent;
-}
-
-static int iRandomRange( int iMin,
-                         int iMax,
-                         unsigned int * puiSeed )
-{
-    return iMin + ( int ) ( rand_r( puiSeed ) % ( unsigned int ) ( iMax - iMin + 1 ) );
-}
-
 static const SensorConfig_t * pxGetSensorConfig( SensorId_t xId )
 {
     return ( xId == SENSOR_TEMPERATURE ) ? &xTempSensor : &xHumSensor;
@@ -529,6 +515,21 @@ static void vSensorTask( void * pvParameters )
             vReportEvent( "cola de sensores llena: lectura descartada" );
         }
 
+        /* Cola de longitud 1: xQueueOverwrite mantiene el ultimo valor
+         * accesible sin consumirlo (se publica aunque la cola principal
+         * estuviera llena). */
+        {
+            QueueHandle_t xLatest = ( pxConfig->xId == SENSOR_TEMPERATURE ) ?
+                                    xTempLatestQueue : xHumLatestQueue;
+
+            ( void ) xQueueOverwrite( xLatest, &xReading );
+        }
+
+        /* Cada sensor marca su bit; la tarea sync espera los dos (event group). */
+        ( void ) xEventGroupSetBits( xSyncGroup,
+                                     ( pxConfig->xId == SENSOR_TEMPERATURE ) ?
+                                     SYNC_TEMP_BIT : SYNC_HUM_BIT );
+
         if( xTaskDelayUntil( &xLastWakeTime, pxConfig->xPeriodTicks ) == pdFALSE )
         {
             xLastWakeTime = xTaskGetTickCount();
@@ -552,7 +553,7 @@ static void vMonitorTask( void * pvParameters )
         if( xQueueReceive( xSensorQueue, &xReading, portMAX_DELAY ) == pdPASS )
         {
             pxConfig = pxGetSensorConfig( xReading.xId );
-            xIsAlarm = ( xReading.iValue > pxConfig->iAlarmThreshold ) ? pdTRUE : pdFALSE;
+            xIsAlarm = ( iIsAlarmValue( xReading.iValue, pxConfig->iAlarmThreshold ) != 0 ) ? pdTRUE : pdFALSE;
 
             xSemaphoreTake( xStateMutex, portMAX_DELAY );
 
@@ -597,6 +598,13 @@ static void vMonitorTask( void * pvParameters )
             if( xIsAlarm == pdTRUE )
             {
                 xSemaphoreGive( xAlarmSemaphore );
+            }
+
+            if( xSlowConsumer != pdFALSE )
+            {
+                /* Demo de presion inversa: consumidor lento, la cola se llena
+                 * y los descartados suben mientras dure la tecla k. */
+                vTaskDelay( pdMS_TO_TICKS( SLOW_CONSUMER_MS ) );
             }
         }
     }
@@ -644,6 +652,202 @@ static void vAlarmTask( void * pvParameters )
     }
 }
 
+static void vAggregatorTask( void * pvParameters )
+{
+    QueueHandle_t xSignaled;
+    SensorReading_t xReading;
+    SensorReading_t xLastTemp;
+    SensorReading_t xLastHum;
+    BaseType_t xHaveTemp = pdFALSE;
+    BaseType_t xHaveHum = pdFALSE;
+
+    ( void ) pvParameters;
+
+    for( ; ; )
+    {
+        /* Queue set: espera a que actualice cualquiera de las dos colas. */
+        xSignaled = ( QueueHandle_t ) xQueueSelectFromSet( xAggSet, pdMS_TO_TICKS( 1000 ) );
+
+        if( xSignaled == NULL )
+        {
+            continue;
+        }
+
+        /* xQueuePeek mira el ultimo valor SIN consumirlo; xQueueReceive lo
+         * retira para que el set pueda senalar de nuevo. */
+        if( ( xQueuePeek( xSignaled, &xReading, 0 ) == pdPASS ) &&
+            ( xQueueReceive( xSignaled, &xReading, 0 ) == pdPASS ) )
+        {
+            if( xReading.xId == SENSOR_TEMPERATURE )
+            {
+                xLastTemp = xReading;
+                xHaveTemp = pdTRUE;
+            }
+            else
+            {
+                xLastHum = xReading;
+                xHaveHum = pdTRUE;
+            }
+
+            if( ( xHaveTemp != pdFALSE ) && ( xHaveHum != pdFALSE ) &&
+                ( xDashboardEnabled == pdFALSE ) )
+            {
+                vPrintFormat( "aggreg: par listo temp=%d hum=%d (queue set + peek + receive)",
+                              xLastTemp.iValue, xLastHum.iValue );
+                xHaveTemp = pdFALSE;
+                xHaveHum = pdFALSE;
+            }
+        }
+    }
+}
+
+static void vSyncTask( void * pvParameters )
+{
+    EventBits_t xBits;
+
+    ( void ) pvParameters;
+
+    for( ; ; )
+    {
+        /* Espera a que AMBOS sensores hayan publicado; clear-on-exit
+         * borra los dos bits para el ciclo siguiente. */
+        xBits = xEventGroupWaitBits( xSyncGroup,
+                                     SYNC_TEMP_BIT | SYNC_HUM_BIT,
+                                     pdTRUE,
+                                     pdTRUE,
+                                     portMAX_DELAY );
+
+        if( ( ( xBits & ( SYNC_TEMP_BIT | SYNC_HUM_BIT ) ) ==
+             ( SYNC_TEMP_BIT | SYNC_HUM_BIT ) ) &&
+            ( xDashboardEnabled == pdFALSE ) )
+        {
+            vPrintFormat( "sync: lecturas de temp y hum coordinadas (event group, 2 bits)" );
+        }
+    }
+}
+
+static void vInvLowTask( void * pvParameters )
+{
+    SemaphoreHandle_t xLock;
+    volatile int iWork = 0;
+    int i;
+
+    ( void ) pvParameters;
+
+    for( ; ; )
+    {
+        ( void ) xEventGroupWaitBits( xInvEvents, INV_LOW_GO,
+                                      pdTRUE, pdTRUE, portMAX_DELAY );
+
+        xLock = ( iInvPhase == 1 ) ? xInvBinary : xInvMutex;
+        ( void ) xSemaphoreTake( xLock, portMAX_DELAY );
+        ( void ) xEventGroupSetBits( xInvEvents, INV_HELD );
+
+        /* Trabajo en bucle con yield: la tarea sigue "lista" mientras
+         * sostiene el lock (clave para la demo de inversion). */
+        for( i = 0; i < INV_WORK_ITERS; i++ )
+        {
+            iWork = i;
+            taskYIELD();
+        }
+
+        xSemaphoreGive( xLock );
+    }
+
+    ( void ) iWork;
+}
+
+static void vInvMedTask( void * pvParameters )
+{
+    TickType_t xStart;
+
+    ( void ) pvParameters;
+
+    for( ; ; )
+    {
+        ( void ) xEventGroupWaitBits( xInvEvents, INV_MED_GO,
+                                      pdTRUE, pdTRUE, portMAX_DELAY );
+
+        xStart = xTaskGetTickCount();
+
+        /* Ocupa la CPU ~1 s; con prioridad 2 hunde a la BAJA (1). */
+        while( ( xTaskGetTickCount() - xStart ) < pdMS_TO_TICKS( INV_MED_MS ) )
+        {
+            volatile int iSpin;
+
+            for( iSpin = 0; iSpin < 500; iSpin++ )
+            {
+            }
+
+            taskYIELD();
+        }
+
+        ( void ) xEventGroupSetBits( xInvEvents, INV_MED_DONE );
+    }
+}
+
+static void vInvHighTask( void * pvParameters )
+{
+    SemaphoreHandle_t xLock;
+    TickType_t xStart;
+    TickType_t xEnd;
+
+    ( void ) pvParameters;
+
+    for( ; ; )
+    {
+        ( void ) xEventGroupWaitBits( xInvEvents, INV_HIGH_GO,
+                                      pdTRUE, pdTRUE, portMAX_DELAY );
+
+        xLock = ( iInvPhase == 1 ) ? xInvBinary : xInvMutex;
+        xStart = xTaskGetTickCount();
+        ( void ) xSemaphoreTake( xLock, portMAX_DELAY );
+        xEnd = xTaskGetTickCount();
+
+        iInvDtMs[ iInvPhase - 1 ] = ( int ) (
+            ( ( unsigned long ) ( xEnd - xStart ) * 1000UL ) /
+            ( unsigned long ) configTICK_RATE_HZ );
+
+        xSemaphoreGive( xLock );
+        ( void ) xEventGroupSetBits( xInvEvents, INV_HIGH_DONE );
+    }
+}
+
+static void vInversionDemoTask( void * pvParameters )
+{
+    int iPhase;
+
+    ( void ) pvParameters;
+
+    for( iPhase = 1; iPhase <= 2; iPhase++ )
+    {
+        iInvPhase = iPhase;
+        ( void ) xEventGroupClearBits( xInvEvents, INV_ALL_CLEAR );
+
+        ( void ) xEventGroupSetBits( xInvEvents, INV_LOW_GO );
+        ( void ) xEventGroupWaitBits( xInvEvents, INV_HELD,
+                                      pdTRUE, pdTRUE, portMAX_DELAY );
+
+        ( void ) xEventGroupSetBits( xInvEvents, INV_MED_GO );
+        vTaskDelay( pdMS_TO_TICKS( 30 ) );
+
+        ( void ) xEventGroupSetBits( xInvEvents, INV_HIGH_GO );
+        ( void ) xEventGroupWaitBits( xInvEvents, INV_HIGH_DONE,
+                                      pdTRUE, pdTRUE, portMAX_DELAY );
+        ( void ) xEventGroupWaitBits( xInvEvents, INV_MED_DONE,
+                                      pdTRUE, pdTRUE, portMAX_DELAY );
+    }
+
+    vReportEvent( "inversion: semaforo binario (sin herencia) -> la ALTA espero %d ms",
+                  iInvDtMs[ 0 ] );
+    vReportEvent( "inversion: mutex (herencia de prioridades) -> la ALTA espero %d ms",
+                  iInvDtMs[ 1 ] );
+
+    iInvPhase = 0;
+    xInvDemoRunning = pdFALSE;
+    vTaskDelete( NULL );
+}
+
 static unsigned long ulBusyPercentX10( void )
 {
     TaskStatus_t xStatus[ 16 ];
@@ -687,64 +891,6 @@ static unsigned long ulBusyPercentX10( void )
     }
 
     return ulSumTenths;
-}
-
-static void vFormatSpark( char * pcBuffer,
-                          size_t xBufferSize,
-                          const int * piHistory,
-                          unsigned int uiNext,
-                          int iMinimum,
-                          int iMaximum )
-{
-    static const char pcLevels[] = " .:-=+*#%@";
-    unsigned int uiCount;
-    unsigned int uiStart;
-    unsigned int uiIndex;
-
-    if( uiNext < SPARK_HISTORY )
-    {
-        uiCount = uiNext;
-        uiStart = 0U;
-    }
-    else
-    {
-        uiCount = SPARK_HISTORY;
-        uiStart = uiNext - SPARK_HISTORY;
-    }
-
-    if( ( uiCount == 0U ) || ( xBufferSize < 2U ) )
-    {
-        ( void ) snprintf( pcBuffer, xBufferSize, "(sin datos)" );
-        return;
-    }
-
-    if( uiCount > ( xBufferSize - 1U ) )
-    {
-        uiCount = ( unsigned int ) ( xBufferSize - 1U );
-    }
-
-    for( uiIndex = 0U; uiIndex < uiCount; uiIndex++ )
-    {
-        int iValue = piHistory[ ( uiStart + uiIndex ) % SPARK_HISTORY ];
-        int iLevel;
-
-        if( iValue <= iMinimum )
-        {
-            iLevel = 0;
-        }
-        else if( iValue >= iMaximum )
-        {
-            iLevel = 9;
-        }
-        else
-        {
-            iLevel = ( ( iValue - iMinimum ) * 9 ) / ( iMaximum - iMinimum );
-        }
-
-        pcBuffer[ uiIndex ] = pcLevels[ iLevel ];
-    }
-
-    pcBuffer[ uiIndex ] = '\0';
 }
 
 static void vDashboardDraw( void )
@@ -845,10 +991,12 @@ static void vDashboardDraw( void )
     pcValueColor = ( xSnapshot.iLastHumValue > HUM_ALARM_THRESHOLD ) ? COLOR_RED : COLOR_GREEN;
     printf( "  humedad      [%s]  %s%d %%" COLOR_RESET "\n", pcBar, pcValueColor, xSnapshot.iLastHumValue );
 
-    vFormatSpark( pcSpark, sizeof( pcSpark ), xSnapshot.aiTempHistory, xSnapshot.uiTempHistNext, 15, 40 );
+    vFormatSpark( pcSpark, sizeof( pcSpark ), xSnapshot.aiTempHistory, xSnapshot.uiTempHistNext,
+                  SPARK_HISTORY, 15, 40 );
     printf( "  hist temp    %s\n", pcSpark );
 
-    vFormatSpark( pcSpark, sizeof( pcSpark ), xSnapshot.aiHumHistory, xSnapshot.uiHumHistNext, 0, 100 );
+    vFormatSpark( pcSpark, sizeof( pcSpark ), xSnapshot.aiHumHistory, xSnapshot.uiHumHistNext,
+                  SPARK_HISTORY, 0, 100 );
     printf( "  hist hum     %s\n\n", pcSpark );
 
     printf( "\n  lecturas %lu     perdidas %lu     picos %lu\n",
@@ -890,6 +1038,54 @@ static void vDashboardDraw( void )
     xSemaphoreGive( xPrintMutex );
 }
 
+static void vRefreshCpuState( void )
+{
+    TaskStatus_t xStatus[ 16 ];
+    configRUN_TIME_COUNTER_TYPE ulTotal = 0;
+    UBaseType_t uxCount;
+    UBaseType_t uxIndex;
+    unsigned long ulTemp = 0UL;
+    unsigned long ulHum = 0UL;
+    unsigned long ulMonitor = 0UL;
+    unsigned long ulAlarm = 0UL;
+    unsigned long ulTenths;
+
+    uxCount = uxTaskGetSystemState( xStatus, 16, &ulTotal );
+
+    if( ( uxCount > 0U ) && ( ulTotal != 0U ) )
+    {
+        for( uxIndex = 0; uxIndex < uxCount; uxIndex++ )
+        {
+            ulTenths = ( ( unsigned long ) xStatus[ uxIndex ].ulRunTimeCounter * 1000UL ) /
+                       ( unsigned long ) ulTotal;
+
+            if( strcmp( xStatus[ uxIndex ].pcTaskName, "temp" ) == 0 )
+            {
+                ulTemp = ulTenths;
+            }
+            else if( strcmp( xStatus[ uxIndex ].pcTaskName, "hum" ) == 0 )
+            {
+                ulHum = ulTenths;
+            }
+            else if( strcmp( xStatus[ uxIndex ].pcTaskName, "monitor" ) == 0 )
+            {
+                ulMonitor = ulTenths;
+            }
+            else if( strcmp( xStatus[ uxIndex ].pcTaskName, "alarm" ) == 0 )
+            {
+                ulAlarm = ulTenths;
+            }
+        }
+    }
+
+    xSemaphoreTake( xStateMutex, portMAX_DELAY );
+    xSystemState.ulCpuTempX10 = ulTemp;
+    xSystemState.ulCpuHumX10 = ulHum;
+    xSystemState.ulCpuMonitorX10 = ulMonitor;
+    xSystemState.ulCpuAlarmX10 = ulAlarm;
+    xSemaphoreGive( xStateMutex );
+}
+
 static void vStatsTask( void * pvParameters )
 {
     unsigned long ulReadings;
@@ -907,6 +1103,7 @@ static void vStatsTask( void * pvParameters )
     for( ; ; )
     {
         vWatchdogBeat( WD_STATS );
+        vRefreshCpuState();
 
         if( xDashboardEnabled != pdFALSE )
         {
@@ -985,6 +1182,15 @@ static void vCommandTask( void * pvParameters )
             vShutdown();
         }
 
+        if( ( xMonitorPrioDemo != pdFALSE ) &&
+            ( xTaskGetTickCount() >= xPrioDemoDeadline ) )
+        {
+            vTaskPrioritySet( xMonitorTaskHandle, PRIORITY_MONITOR );
+            xMonitorPrioDemo = pdFALSE;
+            vReportEvent( "prioridades: monitor restaurado a prioridad %d",
+                          PRIORITY_MONITOR );
+        }
+
         if( xStdinClosed == pdFALSE )
         {
             lBytesRead = read( STDIN_FILENO, &cKey, 1 );
@@ -1045,6 +1251,89 @@ static void vCommandTask( void * pvParameters )
                             vReportEvent( "demo vigia: tarea monitor reanudada" );
                         }
                         break;
+
+                    case 'k':
+                        xSlowConsumer = ( xSlowConsumer == pdFALSE ) ? pdTRUE : pdFALSE;
+                        vReportEvent( "presion inversa: consumidor lento %s (%d s por lectura)",
+                                      ( xSlowConsumer != pdFALSE ) ? "ACTIVADO" : "desactivado",
+                                      SLOW_CONSUMER_MS / 1000 );
+                        break;
+
+                    case 'v':
+                        if( xMonitorPrioDemo == pdFALSE )
+                        {
+                            vTaskPrioritySet( xMonitorTaskHandle, PRIORITY_STATS );
+                            xMonitorPrioDemo = pdTRUE;
+                            xPrioDemoDeadline = xTaskGetTickCount() +
+                                                pdMS_TO_TICKS( PRIORITY_DEMO_MS );
+                            vReportEvent( "prioridades: monitor bajado de %d a %d con vTaskPrioritySet (5 s)",
+                                          PRIORITY_MONITOR, PRIORITY_STATS );
+                        }
+                        else
+                        {
+                            vTaskPrioritySet( xMonitorTaskHandle, PRIORITY_MONITOR );
+                            xMonitorPrioDemo = pdFALSE;
+                            vReportEvent( "prioridades: monitor restaurado a prioridad %d",
+                                          PRIORITY_MONITOR );
+                        }
+                        break;
+
+                    case 'i':
+                        if( xInvDemoRunning != pdFALSE )
+                        {
+                            vReportEvent( "inversion: la demo ya esta en curso" );
+                        }
+                        else
+                        {
+                            TaskHandle_t xDemoHandle;
+                            BaseType_t xCreated;
+
+                            xCreated = xTaskCreate( vInversionDemoTask, "invdemo",
+                                                    configMINIMAL_STACK_SIZE, NULL,
+                                                    PRIORITY_ALARM, &xDemoHandle );
+
+                            if( xCreated == pdPASS )
+                            {
+                                xInvDemoRunning = pdTRUE;
+                                vReportEvent( "inversion: demo iniciada (semforo binario vs mutex, ~2 s)" );
+                            }
+                            else
+                            {
+                                vReportEvent( "inversion: no se pudo crear la tarea de demo" );
+                            }
+                        }
+                        break;
+
+                    case 's':
+                    {
+                        static char pcTaskListBuffer[ 2048 ];
+                        FILE * pxTasksFile;
+
+                        vTaskList( pcTaskListBuffer );
+                        pxTasksFile = fopen( "tasks.txt", "w" );
+
+                        if( pxTasksFile != NULL )
+                        {
+                            ( void ) fputs( pcTaskListBuffer, pxTasksFile );
+                            fclose( pxTasksFile );
+                            vReportEvent( "tareas: volcado en tasks.txt (vTaskList)" );
+
+                            if( xDashboardEnabled == pdFALSE )
+                            {
+                                xSemaphoreTake( xPrintMutex, portMAX_DELAY );
+                                ( void ) printf( "%s", pcTaskListBuffer );
+                                fflush( stdout );
+                                xSemaphoreGive( xPrintMutex );
+                            }
+                        }
+                        else
+                        {
+                            vReportEvent( "tareas: no se pudo escribir tasks.txt" );
+                        }
+
+                        break;
+                    }
+
 
                     case 'd':
                         if( xStdoutIsTty == pdFALSE )
@@ -1107,6 +1396,7 @@ static void vLoggerTask( void * pvParameters )
     size_t xBytes;
     FILE * pxReadings;
     FILE * pxEvents;
+    unsigned long ulReadingsBytes = 0UL;
 
     ( void ) pvParameters;
 
@@ -1147,14 +1437,41 @@ static void vLoggerTask( void * pvParameters )
         if( ( xBytes == sizeof( xRecord ) ) && ( pxReadings != NULL ) )
         {
             const SensorConfig_t * pxConfig = pxGetSensorConfig( xRecord.xId );
+            int iWritten;
 
-            ( void ) fprintf( pxReadings, "%lld,%s,%d,%lu,%d\n",
-                              xRecord.llEpochMs,
-                              pxConfig->pcName,
-                              xRecord.iValue,
-                              xRecord.ulSequence,
-                              ( xRecord.xIsAlarm != pdFALSE ) ? 1 : 0 );
+            iWritten = fprintf( pxReadings, "%lld,%s,%d,%lu,%d\n",
+                                xRecord.llEpochMs,
+                                pxConfig->pcName,
+                                xRecord.iValue,
+                                xRecord.ulSequence,
+                                ( xRecord.xIsAlarm != pdFALSE ) ? 1 : 0 );
+
+            if( iWritten > 0 )
+            {
+                ulReadingsBytes += ( unsigned long ) iWritten;
+            }
+
             fflush( pxReadings );
+
+            if( ulReadingsBytes >= CSV_ROTATE_BYTES )
+            {
+                /* Rotacion: el fichero actual pasa a readings.1.csv. */
+                fclose( pxReadings );
+                ( void ) rename( CSV_READINGS_PATH, "readings.1.csv" );
+                pxReadings = fopen( CSV_READINGS_PATH, "w" );
+
+                if( pxReadings != NULL )
+                {
+                    ulReadingsBytes = ( unsigned long ) fprintf(
+                        pxReadings, "epoch_ms,sensor,valor,secuencia,alarma\n" );
+                    fflush( pxReadings );
+                    vReportEvent( "logger: readings.csv rotado (>64 KiB, respaldo en readings.1.csv)" );
+                }
+                else
+                {
+                    vReportEvent( "logger: rotacion fallo, CSV de lecturas desactivado" );
+                }
+            }
         }
 
         for( ; ; )
@@ -1251,18 +1568,27 @@ static void vWatchdogTask( void * pvParameters )
 
 static void vHttpHandleClient( int iClient )
 {
-    static char pcBody[ 512 ];
+    static char pcBody[ 2048 ];
     char pcHeader[ 256 ];
     char pcRequest[ 512 ];
     char pcEvent[ EVENT_BUFFER_SIZE ];
+    char pcUptime[ 16 ];
     SystemState_t xSnapshot;
     unsigned long ulBusy;
     size_t uiIndex;
     int iBodyLength;
     int iHeaderLength;
+    int xWantJson;
     const char * pcEstado;
+    const char * pcEstadoCss;
+    const char * pcContentType;
+    const char * pcWdText;
+    const char * pcWdCss;
 
-    ( void ) recv( iClient, pcRequest, sizeof( pcRequest ), MSG_DONTWAIT );
+    memset( pcRequest, 0, sizeof( pcRequest ) );
+    ( void ) recv( iClient, pcRequest, sizeof( pcRequest ) - 1, MSG_DONTWAIT );
+
+    xWantJson = ( strncmp( pcRequest, "GET /metrics", 12 ) == 0 ) ? 1 : 0;
 
     xSemaphoreTake( xStateMutex, portMAX_DELAY );
     xSnapshot = xSystemState;
@@ -1283,43 +1609,122 @@ static void vHttpHandleClient( int iClient )
     pcEvent[ uiIndex ] = '\0';
 
     ulBusy = ulBusyPercentX10();
+    vFormatUptime( pcUptime, sizeof( pcUptime ) );
 
     if( xSnapshot.xAlarmActive != pdFALSE )
     {
         pcEstado = "alarma";
+        pcEstadoCss = "bad";
     }
     else if( xSnapshot.xSensorsPaused != pdFALSE )
     {
         pcEstado = "pausa";
+        pcEstadoCss = "warn";
     }
     else
     {
         pcEstado = "normal";
+        pcEstadoCss = "good";
     }
 
-    iBodyLength = snprintf( pcBody, sizeof( pcBody ),
-                            "{\"uptime_s\":%lu,\"estado\":\"%s\",\"alarmas\":%lu,"
-                            "\"lecturas\":%lu,\"perdidas\":%lu,\"picos\":%lu,"
-                            "\"log_perdidas\":%lu,\"cola\":%u,\"heap_libre\":%u,"
-                            "\"watchdog\":\"%s\",\"watchdog_fallos\":%lu,"
-                            "\"cpu_ocupado_pct\":%lu.%lu,\"temp\":%d,\"hum\":%d,"
-                            "\"ultimo_evento\":\"%s\"}",
-                            ( unsigned long ) ( xTaskGetTickCount() / configTICK_RATE_HZ ),
-                            pcEstado,
-                            xSnapshot.ulAlarms,
-                            xSnapshot.ulReadings,
-                            xSnapshot.ulDropped,
-                            xSnapshot.ulSpikes,
-                            xSnapshot.ulLogDrops,
-                            ( unsigned int ) uxQueueMessagesWaiting( xSensorQueue ),
-                            ( unsigned int ) xPortGetFreeHeapSize(),
-                            ( xSnapshot.xWatchdogActive != pdFALSE ) ? "alerta" : "ok",
-                            xSnapshot.ulWatchdogFails,
-                            ulBusy / 10UL,
-                            ulBusy % 10UL,
-                            xSnapshot.iLastTempValue,
-                            xSnapshot.iLastHumValue,
-                            pcEvent );
+    if( xSnapshot.xWatchdogActive != pdFALSE )
+    {
+        pcWdText = "alerta";
+        pcWdCss = "bad";
+    }
+    else
+    {
+        pcWdText = "ok";
+        pcWdCss = "good";
+    }
+
+    if( xWantJson != 0 )
+    {
+        iBodyLength = snprintf( pcBody, sizeof( pcBody ),
+                                "{\"uptime_s\":%lu,\"estado\":\"%s\",\"alarmas\":%lu,"
+                                "\"lecturas\":%lu,\"perdidas\":%lu,\"picos\":%lu,"
+                                "\"log_perdidas\":%lu,\"cola\":%u,\"heap_libre\":%u,"
+                                "\"watchdog\":\"%s\",\"watchdog_fallos\":%lu,"
+                                "\"cpu_ocupado_pct\":%lu.%lu,"
+                                "\"cpu_pct\":{\"temp\":%lu.%lu,\"hum\":%lu.%lu,"
+                                "\"monitor\":%lu.%lu,\"alarm\":%lu.%lu},"
+                                "\"temp\":%d,\"hum\":%d,"
+                                "\"ultimo_evento\":\"%s\"}",
+                                ( unsigned long ) ( xTaskGetTickCount() / configTICK_RATE_HZ ),
+                                pcEstado,
+                                xSnapshot.ulAlarms,
+                                xSnapshot.ulReadings,
+                                xSnapshot.ulDropped,
+                                xSnapshot.ulSpikes,
+                                xSnapshot.ulLogDrops,
+                                ( unsigned int ) uxQueueMessagesWaiting( xSensorQueue ),
+                                ( unsigned int ) xPortGetFreeHeapSize(),
+                                pcWdText,
+                                xSnapshot.ulWatchdogFails,
+                                ulBusy / 10UL,
+                                ulBusy % 10UL,
+                                xSnapshot.ulCpuTempX10 / 10UL,
+                                xSnapshot.ulCpuTempX10 % 10UL,
+                                xSnapshot.ulCpuHumX10 / 10UL,
+                                xSnapshot.ulCpuHumX10 % 10UL,
+                                xSnapshot.ulCpuMonitorX10 / 10UL,
+                                xSnapshot.ulCpuMonitorX10 % 10UL,
+                                xSnapshot.ulCpuAlarmX10 / 10UL,
+                                xSnapshot.ulCpuAlarmX10 % 10UL,
+                                xSnapshot.iLastTempValue,
+                                xSnapshot.iLastHumValue,
+                                pcEvent );
+        pcContentType = "application/json; charset=utf-8";
+    }
+    else
+    {
+        iBodyLength = snprintf( pcBody, sizeof( pcBody ),
+                                "<!doctype html>\n<html lang=\"es\">\n<head>\n"
+                                "<meta charset=\"utf-8\">\n"
+                                "<meta http-equiv=\"refresh\" content=\"2\">\n"
+                                "<title>Estacion FreeRTOS</title>\n"
+                                "<style>body{font-family:monospace;background:#0d1117;color:#c9d6d4;margin:2rem}"
+                                "h1{font-size:1.1rem}table{border-collapse:collapse}"
+                                "td,th{border:1px solid #30363d;padding:.35rem .7rem;text-align:left}"
+                                ".bad{color:#f85149}.good{color:#3fb950}.warn{color:#e3b341}</style>\n"
+                                "</head>\n<body>\n"
+                                "<h1>Estacion de sensores FreeRTOS</h1>\n"
+                                "<p>estado: <b class=\"%s\">%s</b> &nbsp; uptime: %s &nbsp; "
+                                "alarmas: %lu &nbsp; watchdog: <b class=\"%s\">%s</b></p>\n"
+                                "<table>\n"
+                                "<tr><th>temperatura</th><td>%d C</td><th>humedad</th><td>%d %%</td></tr>\n"
+                                "<tr><th>lecturas</th><td>%lu</td><th>perdidas</th><td>%lu</td></tr>\n"
+                                "<tr><th>cola</th><td>%u/%u</td><th>heap libre</th><td>%u KiB</td></tr>\n"
+                                "<tr><th>cpu sistema</th><td>%lu.%lu%%</td>"
+                                "<th>cpu monitor</th><td>%lu.%lu%%</td></tr>\n"
+                                "<tr><th>picos</th><td>%lu</td><th>log_perdidas</th><td>%lu</td></tr>\n"
+                                "</table>\n"
+                                "<p>ultimo evento: %s</p>\n"
+                                "<p>JSON: <a href=\"/metrics\">/metrics</a> &middot; "
+                                "auto-recarga cada 2 s</p>\n"
+                                "</body>\n</html>\n",
+                                pcEstadoCss,
+                                pcEstado,
+                                pcUptime,
+                                xSnapshot.ulAlarms,
+                                pcWdCss,
+                                pcWdText,
+                                xSnapshot.iLastTempValue,
+                                xSnapshot.iLastHumValue,
+                                xSnapshot.ulReadings,
+                                xSnapshot.ulDropped,
+                                ( unsigned int ) uxQueueMessagesWaiting( xSensorQueue ),
+                                ( unsigned int ) SENSOR_QUEUE_LENGTH,
+                                ( unsigned int ) ( xPortGetFreeHeapSize() / 1024U ),
+                                ulBusy / 10UL,
+                                ulBusy % 10UL,
+                                xSnapshot.ulCpuMonitorX10 / 10UL,
+                                xSnapshot.ulCpuMonitorX10 % 10UL,
+                                xSnapshot.ulSpikes,
+                                xSnapshot.ulLogDrops,
+                                pcEvent );
+        pcContentType = "text/html; charset=utf-8";
+    }
 
     if( ( iBodyLength <= 0 ) || ( iBodyLength >= ( int ) sizeof( pcBody ) ) )
     {
@@ -1328,9 +1733,10 @@ static void vHttpHandleClient( int iClient )
 
     iHeaderLength = snprintf( pcHeader, sizeof( pcHeader ),
                               "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=utf-8\r\n"
+                              "Content-Type: %s\r\n"
                               "Content-Length: %d\r\n"
                               "Connection: close\r\n\r\n",
+                              pcContentType,
                               iBodyLength );
 
     if( ( iHeaderLength > 0 ) && ( iHeaderLength < ( int ) sizeof( pcHeader ) ) )
@@ -1483,18 +1889,35 @@ int main( void )
     }
 
     xSensorQueue = xQueueCreate( SENSOR_QUEUE_LENGTH, sizeof( SensorReading_t ) );
+    xTempLatestQueue = xQueueCreate( 1, sizeof( SensorReading_t ) );
+    xHumLatestQueue = xQueueCreate( 1, sizeof( SensorReading_t ) );
     xPrintMutex = xSemaphoreCreateMutex();
     xStateMutex = xSemaphoreCreateMutex();
     xAlarmSemaphore = xSemaphoreCreateBinary();
     xDropSemaphore = xSemaphoreCreateCounting( SENSOR_QUEUE_LENGTH, 0 );
+    xInvBinary = xSemaphoreCreateBinary();
+    xInvMutex = xSemaphoreCreateMutex();
+    /* El semaforo binario arranca vacio: lo dejamos disponible para que
+     * la tarea BAJA pueda cogerlo en la demo de inversion de prioridades. */
+    configASSERT( xSemaphoreGive( xInvBinary ) == pdPASS );
     xEventGroup = xEventGroupCreate();
+    xSyncGroup = xEventGroupCreate();
+    xInvEvents = xEventGroupCreate();
     xReadingStream = xStreamBufferCreate( STREAM_LENGTH, 1 );
     xEventMessage = xMessageBufferCreate( MESSAGE_BUFFER_LENGTH );
 
-    configASSERT( ( xSensorQueue != NULL ) && ( xPrintMutex != NULL ) &&
+    configASSERT( ( xSensorQueue != NULL ) && ( xTempLatestQueue != NULL ) &&
+                  ( xHumLatestQueue != NULL ) && ( xPrintMutex != NULL ) &&
                   ( xStateMutex != NULL ) && ( xAlarmSemaphore != NULL ) &&
-                  ( xDropSemaphore != NULL ) && ( xEventGroup != NULL ) &&
+                  ( xDropSemaphore != NULL ) && ( xInvBinary != NULL ) &&
+                  ( xInvMutex != NULL ) && ( xEventGroup != NULL ) &&
+                  ( xSyncGroup != NULL ) && ( xInvEvents != NULL ) &&
                   ( xReadingStream != NULL ) && ( xEventMessage != NULL ) );
+
+    xAggSet = xQueueCreateSet( 2 );
+    configASSERT( xAggSet != NULL );
+    configASSERT( xQueueAddToSet( xTempLatestQueue, xAggSet ) == pdPASS );
+    configASSERT( xQueueAddToSet( xHumLatestQueue, xAggSet ) == pdPASS );
 
     memset( &xSystemState, 0, sizeof( xSystemState ) );
     strcpy( xSystemState.pcLastEvent, "sistema iniciado" );
@@ -1523,9 +1946,11 @@ int main( void )
                             NULL, PRIORITY_COMMAND, &xCommandTaskHandle );
     configASSERT( xResult == pdPASS );
 
-    xResult = xTaskCreate( vLoggerTask, "logger", configMINIMAL_STACK_SIZE,
-                            NULL, PRIORITY_LOGGER, &xLoggerTaskHandle );
-    configASSERT( xResult == pdPASS );
+    /* Logger con alojamiento estatico (TCB y pila propios, sin pvPortMalloc). */
+    xLoggerTaskHandle = xTaskCreateStatic( vLoggerTask, "logger", configMINIMAL_STACK_SIZE,
+                                            NULL, PRIORITY_LOGGER,
+                                            xLoggerStack, &xLoggerTcb );
+    configASSERT( xLoggerTaskHandle != NULL );
 
     xResult = xTaskCreate( vWatchdogTask, "watchdog", configMINIMAL_STACK_SIZE,
                             NULL, PRIORITY_WATCHDOG, &xWatchdogTaskHandle );
@@ -1533,6 +1958,26 @@ int main( void )
 
     xResult = xTaskCreate( vHttpTask, "http", configMINIMAL_STACK_SIZE,
                             NULL, PRIORITY_HTTP, &xHttpTaskHandle );
+    configASSERT( xResult == pdPASS );
+
+    xResult = xTaskCreate( vAggregatorTask, "aggreg", configMINIMAL_STACK_SIZE,
+                            NULL, PRIORITY_STATS, &xAggregatorTaskHandle );
+    configASSERT( xResult == pdPASS );
+
+    xResult = xTaskCreate( vSyncTask, "sync", configMINIMAL_STACK_SIZE,
+                            NULL, PRIORITY_STATS, &xSyncTaskHandle );
+    configASSERT( xResult == pdPASS );
+
+    xResult = xTaskCreate( vInvLowTask, "inv-low", configMINIMAL_STACK_SIZE,
+                            NULL, PRIORITY_STATS, &xInvLowTaskHandle );
+    configASSERT( xResult == pdPASS );
+
+    xResult = xTaskCreate( vInvMedTask, "inv-med", configMINIMAL_STACK_SIZE,
+                            NULL, PRIORITY_SENSOR, &xInvMedTaskHandle );
+    configASSERT( xResult == pdPASS );
+
+    xResult = xTaskCreate( vInvHighTask, "inv-high", configMINIMAL_STACK_SIZE,
+                            NULL, PRIORITY_MONITOR, &xInvHighTaskHandle );
     configASSERT( xResult == pdPASS );
 
     xSpikeTimer = xTimerCreate( "spike", pdMS_TO_TICKS( SPIKE_PERIOD_MS ),
