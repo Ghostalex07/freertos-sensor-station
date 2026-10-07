@@ -1,0 +1,143 @@
+/* Dashboard en terminal: redibuja la pantalla completa con ANSI cada
+ * vez que lo pide vStatsTask. Solo renderiza: el estado lo lee de
+ * xSystemState (bajo xStateMutex) y las barras/sparklines las formatea
+ * logic.c (vFormatBar, vFormatSpark, uiClampPercent). */
+
+#include <stdio.h>
+
+#include <FreeRTOS.h>
+#include <task.h>
+
+#include "logic.h"
+#include "app_shared.h"
+#include "dashboard.h"
+
+static const char * pcHelpDashboard =
+    "[t] alarma  [p] pausa  [c] sigue  [r] reset  [d] lineas  [w] vigia\n"
+    "        [i] inversion  [v] prioridad  [k] presion  [s] tareas  [q] salir";
+
+void vDashboardDraw( void )
+{
+    SystemState_t xSnapshot;
+    TaskStatus_t xStatus[ TASK_STATUS_MAX ];
+    configRUN_TIME_COUNTER_TYPE ulTotal = 0;
+    UBaseType_t uxCount;
+    UBaseType_t uxIndex;
+    unsigned long ulBusyTenths;
+    unsigned long ulTenths;
+    unsigned int uiTempPercent;
+    unsigned int uiHumPercent;
+    unsigned int uiQueuePercent;
+    unsigned int uiHeapPercent;
+    unsigned int uiHeapFreeKb;
+    unsigned long ulQueueCount;
+    char pcBar[ VALUE_BAR_WIDTH + 8 ];
+    char pcUptime[ 16 ];
+    const char * pcStateColor;
+    const char * pcStateText;
+    const char * pcValueColor;
+    size_t xFreeHeap;
+    size_t xTotalHeap = configTOTAL_HEAP_SIZE;
+    char pcSpark[ SPARK_HISTORY + 1 ];
+
+    xSemaphoreTake( xStateMutex, portMAX_DELAY );
+    xSnapshot = xSystemState;
+    xSemaphoreGive( xStateMutex );
+
+    uxCount = uxTaskGetSystemState( xStatus, TASK_STATUS_MAX, &ulTotal );
+    ulBusyTenths = ulBusyFromSample( xStatus, uxCount, ulTotal );
+
+    vFormatUptime( pcUptime, sizeof( pcUptime ) );
+
+    if( xSnapshot.xAlarmActive != pdFALSE )
+    {
+        pcStateColor = COLOR_RED;
+        pcStateText = "ALARMA";
+    }
+    else if( xSnapshot.xSensorsPaused != pdFALSE )
+    {
+        pcStateColor = COLOR_YELLOW;
+        pcStateText = "PAUSA";
+    }
+    else
+    {
+        pcStateColor = COLOR_GREEN;
+        pcStateText = "NORMAL";
+    }
+
+    uiTempPercent = uiClampPercent( xSnapshot.iLastTempValue, 50 );
+    uiHumPercent = uiClampPercent( xSnapshot.iLastHumValue, 100 );
+    pcValueColor = ( xSnapshot.iLastTempValue > TEMP_ALARM_THRESHOLD ) ? COLOR_RED : COLOR_GREEN;
+
+    ulQueueCount = ( unsigned long ) uxQueueMessagesWaiting( xSensorQueue );
+    uiQueuePercent = ( unsigned int ) ( ( ulQueueCount * 100UL ) / ( unsigned long ) SENSOR_QUEUE_LENGTH );
+
+    xFreeHeap = xPortGetFreeHeapSize();
+    uiHeapPercent = ( unsigned int ) ( ( xFreeHeap * 100U ) / ( size_t ) xTotalHeap );
+    uiHeapFreeKb = ( unsigned int ) ( xFreeHeap / 1024U );
+
+    xSemaphoreTake( xPrintMutex, portMAX_DELAY );
+
+    printf( "\x1b[H\x1b[2J" );
+    printf( COLOR_BOLD "=== Estacion de sensores FreeRTOS (puerto POSIX) ===" COLOR_RESET "\n\n" );
+    printf( "  uptime %s     estado: %s%s" COLOR_RESET "     alarmas: %lu     watchdog: %s%s" COLOR_RESET "\n\n",
+            pcUptime,
+            pcStateColor,
+            pcStateText,
+            xSnapshot.ulAlarms,
+            ( xSnapshot.xWatchdogActive != pdFALSE ) ? COLOR_RED : COLOR_GREEN,
+            ( xSnapshot.xWatchdogActive != pdFALSE ) ? "ALERTA" : "ok" );
+
+    vFormatBar( pcBar, sizeof( pcBar ), uiTempPercent, VALUE_BAR_WIDTH );
+    printf( "  temperatura  [%s]  %s%d C" COLOR_RESET "\n", pcBar, pcValueColor, xSnapshot.iLastTempValue );
+
+    vFormatBar( pcBar, sizeof( pcBar ), uiHumPercent, VALUE_BAR_WIDTH );
+    pcValueColor = ( xSnapshot.iLastHumValue > HUM_ALARM_THRESHOLD ) ? COLOR_RED : COLOR_GREEN;
+    printf( "  humedad      [%s]  %s%d %%" COLOR_RESET "\n", pcBar, pcValueColor, xSnapshot.iLastHumValue );
+
+    vFormatSpark( pcSpark, sizeof( pcSpark ), xSnapshot.aiTempHistory, xSnapshot.uiTempHistNext,
+                  SPARK_HISTORY, 15, 40 );
+    printf( "  hist temp    %s\n", pcSpark );
+
+    vFormatSpark( pcSpark, sizeof( pcSpark ), xSnapshot.aiHumHistory, xSnapshot.uiHumHistNext,
+                  SPARK_HISTORY, 0, 100 );
+    printf( "  hist hum     %s\n\n", pcSpark );
+
+    printf( "\n  lecturas %lu     perdidas %lu     picos %lu\n",
+            xSnapshot.ulReadings, xSnapshot.ulDropped, xSnapshot.ulSpikes );
+
+    vFormatBar( pcBar, sizeof( pcBar ), uiQueuePercent, 16 );
+    printf( "  cola [%s] %lu/%u", pcBar, ulQueueCount, ( unsigned int ) SENSOR_QUEUE_LENGTH );
+
+    vFormatBar( pcBar, sizeof( pcBar ), uiHeapPercent, 16 );
+    printf( "     heap_libre [%s] %u/%u KiB\n", pcBar, uiHeapFreeKb,
+            ( unsigned int ) ( xTotalHeap / 1024U ) );
+
+    printf( "\n  " COLOR_BOLD "CPU por tarea" COLOR_RESET "\n" );
+
+    for( uxIndex = 0; uxIndex < uxCount; uxIndex++ )
+    {
+        if( ulTotal == 0 )
+        {
+            ulTenths = 0;
+        }
+        else
+        {
+            ulTenths = ( ( unsigned long ) xStatus[ uxIndex ].ulRunTimeCounter * 1000UL ) / ( unsigned long ) ulTotal;
+        }
+
+        vFormatBar( pcBar, sizeof( pcBar ), ( unsigned int ) ( ulTenths / 10UL ), CPU_BAR_WIDTH );
+        printf( "   %-9s %lu.%lu%%  %s\n",
+                xStatus[ uxIndex ].pcTaskName,
+                ulTenths / 10UL,
+                ulTenths % 10UL,
+                pcBar );
+    }
+
+    printf( "\n   ocupado: %lu.%lu%%\n", ulBusyTenths / 10UL, ulBusyTenths % 10UL );
+    printf( "\n  " COLOR_YELLOW "ultimo evento:" COLOR_RESET " %s\n", xSnapshot.pcLastEvent );
+    printf( "  " COLOR_BOLD "%s" COLOR_RESET "\n", pcHelpDashboard );
+    fflush( stdout );
+
+    xSemaphoreGive( xPrintMutex );
+}

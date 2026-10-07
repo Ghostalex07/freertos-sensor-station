@@ -76,7 +76,7 @@ Pulsa las teclas mientras la aplicación está en ejecución. Si stdout es una *
 | `c` | Reanuda los sensores |
 | `r` | Reinicia el contador de alarmas |
 | `d` | Alterna entre modo dashboard y modo línea (solo con terminal) |
-| `w` | Telemetría de watchdog: suspende/reanuda `monitor` para ver la detección de «sin latido» y la recuperación |
+| `w` | Telemetría de watchdog: detiene los latidos de `monitor` (sin suspenderla, para no retener mutex) y ver la detección de «sin latido» y la recuperación |
 | `i` | **Inversión de prioridades**: tarea BAJA toma el recurso (semáforo binario 1ª fase, mutex con herencia 2ª fase); la ALTA espera y se imprime su tiempo de bloqueo |
 | `v` | **`vTaskPrioritySet`**: baja `monitor` de prioridad 3 a 1 durante 5 s y la restaura |
 | `k` | **Backpressure**: activa/desactiva un consumidor lento (2 s por lectura) y observa cómo sube `perdidas` |
@@ -196,7 +196,7 @@ El JSON incluye ahora **`cpu_pct` con el uso de CPU (%) de temp, hum, monitor y 
 
 ### Watchdog
 
-Cada tarea latida con `vWatchdogBeat()`; la tarea `watchdog` compara con timeouts propios (5 s, 8 s para `stats`). Pasa `w` para suspender `monitor` y ver el evento `sin latido` + `recupero el latido`.
+Cada tarea latida con `vWatchdogBeat()`; la tarea `watchdog` compara con timeouts propios (5 s, 8 s para `stats`). Pasa `w` para detener los latidos de `monitor` (bandera interna, nunca `vTaskSuspend`: suspenderla con mutex retenidos colgaría el sistema) y ver el evento `sin latido` + `recupero el latido`.
 
 ### Semilla reproducible
 
@@ -217,7 +217,7 @@ Todo lo ajustable está en dos sitios:
 | Tamaño del heap | `FreeRTOSConfig.h` | `configTOTAL_HEAP_SIZE = 524288` (512 KiB). |
 | Tamaño de pila mínimo | `FreeRTOSConfig.h` | `configMINIMAL_STACK_SIZE = 2048`. |
 | Frecuencia del tick | `FreeRTOSConfig.h` | 100 Hz (10 ms por tick). |
-| Detección de desbordamiento de pila | `FreeRTOSConfig.h` | `configCHECK_FOR_STACK_OVERFLOW = 2`. |
+| Detección de desbordamiento de pila | `FreeRTOSConfig.h` | `configCHECK_FOR_STACK_OVERFLOW = 2`. ⚠️ En el puerto GCC_POSIX cada tarea corre en un pthread con pila nativa: la marca de pila de FreeRTOS es constante, la protección real la aporta el propio sistema. |
 | CPU % por tarea | `FreeRTOSConfig.h` | `configGENERATE_RUN_TIME_STATS = 1` con contador propio de 1 µs (`portALT_GET_RUN_TIME_COUNTER_VALUE`, ver `ulPortGetAltMicros()` en `main.c`). |
 
 > Los periodos de las tareas, la ventana de limpieza del event group (3 s) y el periodo del timer (10 s) también se definen en `main.c`.
@@ -250,8 +250,16 @@ freertos-sensor-station/
 ├── LICENSE               # MIT
 ├── README.md             # Este archivo
 ├── .gitignore
+├── app_config.h          # Constantes de la app: periodos, umbrales, rutas CSV, prioridades
+├── app_types.h           # Tipos compartidos: sensores, registro CSV, estado global, ids del watchdog
+├── app_shared.h          # Costura entre módulos: globals `extern` y utilidades comunes
 ├── logic.c / logic.h     # Funciones puras (sparklines, barras, umbrales) con tests
-├── main.c                # Tareas, colas, buffers, watchdog, http, dashboard y controles
+├── main.c                # Orquestador: sensores, monitor, alarmas, stats, sync, init y main()
+├── watchdog.c / watchdog.h    # Latidos de cada tarea y revisión periódica (vWatchdogBeat)
+├── logger_csv.c / logger_csv.h # Escritura y rotación de readings.csv y events.csv
+├── http_server.c / http_server.h # Servidor HTTP: dashboard en HTML y métricas en JSON
+├── dashboard.c / dashboard.h  # Pintado ANSI del dashboard (barras, sparklines, CPU por tarea)
+├── demos.c / demos.h     # Teclado (vCommandTask) y demos: inversión, prioridades, vigía, presión
 ├── tests/test_logic.c    # Tests unitarios (ctest)
 ├── tools/plot_csv.py     # Gráfica SVG de readings.csv sin dependencias
 └── docs/

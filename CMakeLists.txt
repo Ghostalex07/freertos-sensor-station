@@ -24,9 +24,41 @@ else()
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(freertos_kernel)
+
+    # Ancla de suministro: el tag debe apuntar exactamente al commit esperado.
+    # Si alguien mueve el tag V11.3.1 en GitHub, la configuracion falla en vez
+    # de descargar codigo no revisado.
+    set(FREERTOS_KERNEL_EXPECTED_SHA "3a22924e0a9ddbbc8b0758881c33b3422a5cc20d")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+            WORKING_DIRECTORY "${freertos_kernel_SOURCE_DIR}"
+            OUTPUT_VARIABLE FREERTOS_KERNEL_SHA
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE FREERTOS_KERNEL_SHA_RESULT
+        )
+        if(NOT FREERTOS_KERNEL_SHA_RESULT EQUAL 0)
+            message(FATAL_ERROR "No se pudo leer el SHA del kernel FreeRTOS")
+        endif()
+        if(NOT FREERTOS_KERNEL_SHA STREQUAL FREERTOS_KERNEL_EXPECTED_SHA)
+            message(FATAL_ERROR
+                "FreeRTOS-Kernel GIT_TAG V11.3.1 apunta a ${FREERTOS_KERNEL_SHA}, "
+                "se esperaba ${FREERTOS_KERNEL_EXPECTED_SHA}")
+        endif()
+        message(STATUS "FreeRTOS-Kernel anclado en ${FREERTOS_KERNEL_SHA}")
+    endif()
 endif()
 
-add_executable(sensor_station main.c logic.c)
+add_executable(sensor_station
+    main.c
+    logic.c
+    watchdog.c
+    logger_csv.c
+    http_server.c
+    dashboard.c
+    demos.c
+)
 target_compile_options(sensor_station PRIVATE -Wall -Wextra)
 target_compile_definitions(sensor_station PRIVATE _DEFAULT_SOURCE)
 target_link_libraries(sensor_station freertos_kernel freertos_config Threads::Threads)

@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Toolchain versions
         run: cmake --version && gcc --version
@@ -25,7 +25,7 @@ jobs:
       # build/_deps (localizacion por defecto) para reutilizarlo entre runs.
       # La clave lleva el tag para nunca restaurar un kernel de otra version.
       - name: Cache FetchContent (build/_deps)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: fetchcontent-V11.3.1-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
@@ -61,16 +61,32 @@ jobs:
           fi
           echo "Smoke test OK"
 
+      # Suite de integracion TAP (bash, sin dependencias). Secuencial: el
+      # puerto HTTP 8080 es fijo en C, nunca se ejecuta en paralelo.
+      - name: Integration tests
+        env:
+          SENSOR_STATION_SEED: "42"
+        timeout-minutes: 5
+        run: bash tests/integration/run_all.sh ./build/sensor_station
+
+      - name: Upload integration test logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: it-logs-build-fetchcontent
+          path: ${{ runner.temp }}/it-logs/
+          if-no-files-found: ignore
+
   build-kernel-local:
     name: build-kernel-local (kernel local, sin red)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout FreeRTOS-Kernel V11.3.1
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: FreeRTOS/FreeRTOS-Kernel
           ref: V11.3.1
@@ -108,16 +124,32 @@ jobs:
           fi
           echo "Smoke test OK"
 
+      # Suite de integracion TAP (bash, sin dependencias). Secuencial: el
+      # puerto HTTP 8080 es fijo en C, nunca se ejecuta en paralelo.
+      - name: Integration tests
+        env:
+          SENSOR_STATION_SEED: "42"
+        timeout-minutes: 5
+        run: bash tests/integration/run_all.sh ./build/sensor_station
+
+      - name: Upload integration test logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: it-logs-build-kernel-local
+          path: ${{ runner.temp }}/it-logs/
+          if-no-files-found: ignore
+
   build-asan:
     name: build-asan (kernel local, ASan + UBSan)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout FreeRTOS-Kernel V11.3.1
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: FreeRTOS/FreeRTOS-Kernel
           ref: V11.3.1
@@ -157,3 +189,19 @@ jobs:
             exit 1
           fi
           echo "ASan smoke test OK"
+
+      # Suite de integracion TAP (bash, sin dependencias). Secuencial: el
+      # puerto HTTP 8080 es fijo en C, nunca se ejecuta en paralelo.
+      - name: Integration tests
+        env:
+          SENSOR_STATION_SEED: "42"
+        timeout-minutes: 5
+        run: bash tests/integration/run_all.sh ./build/sensor_station
+
+      - name: Upload integration test logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: it-logs-build-asan
+          path: ${{ runner.temp }}/it-logs/
+          if-no-files-found: ignore
