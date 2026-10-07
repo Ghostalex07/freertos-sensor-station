@@ -24,9 +24,10 @@
 #include "dashboard.h"
 #include "demos.h"
 
-/* Estado que comparte main.c con el resto de modulos: todo lo declarado
- * en app_shared.h se define aqui SIN `static` (la costura entre ficheros).
- * Lo que solo usa main.c se queda `static` justo debajo. */
+/* State shared between main.c and the rest of the modules: everything
+ * declared in app_shared.h is defined here WITHOUT `static` (the seam
+ * between translation units). What only main.c uses stays `static`
+ * right below. */
 
 QueueHandle_t xSensorQueue;
 SemaphoreHandle_t xPrintMutex;
@@ -51,7 +52,7 @@ volatile BaseType_t xSlowConsumer = pdFALSE;
 BaseType_t xStdinIsTty = pdFALSE;
 BaseType_t xStdoutIsTty = pdFALSE;
 
-/* --- estado de uso exclusivo de main.c -------------------------------- */
+/* --- state used exclusively by main.c --------------------------------- */
 
 static QueueHandle_t xTempLatestQueue;
 static QueueHandle_t xHumLatestQueue;
@@ -93,7 +94,7 @@ static unsigned int uiSpikeSeed = 1;
 static const SensorConfig_t xTempSensor =
 {
     .xId = SENSOR_TEMPERATURE,
-    .pcName = "temperatura",
+    .pcName = "temperature",
     .pcUnit = "C",
     .iAlarmThreshold = TEMP_ALARM_THRESHOLD,
     .xPeriodTicks = pdMS_TO_TICKS( TEMP_PERIOD_MS ),
@@ -104,7 +105,7 @@ static const SensorConfig_t xTempSensor =
 static const SensorConfig_t xHumSensor =
 {
     .xId = SENSOR_HUMIDITY,
-    .pcName = "humedad",
+    .pcName = "humidity",
     .pcUnit = "%",
     .iAlarmThreshold = HUM_ALARM_THRESHOLD,
     .xPeriodTicks = pdMS_TO_TICKS( HUM_PERIOD_MS ),
@@ -251,7 +252,7 @@ void vReportEvent( const char * pcFormat,
 
     if( xEventMessage != NULL )
     {
-        /* vFormatVa ya trunca: strlen <= PRINT_BUFFER_SIZE - 1 siempre. */
+        /* vFormatVa already truncates: strlen <= PRINT_BUFFER_SIZE - 1 always. */
         ( void ) xMessageBufferSend( xEventMessage, pcBuffer, strlen( pcBuffer ), 0 );
     }
 
@@ -263,14 +264,14 @@ void vReportEvent( const char * pcFormat,
 
 void vShutdown( void )
 {
-    /* Sin xPrintMutex: al salir no se debe bloquear (si stdout se queda
-     * sin espacio el Take con portMAX_DELAY colgaria el apagado). */
+    /* No xPrintMutex: shutdown must never block (if stdout runs out of
+     * space, a Take with portMAX_DELAY would hang the exit path). */
     if( xDashboardEnabled != pdFALSE )
     {
         printf( "\x1b[2J\x1b[H" );
     }
 
-    printf( "[%4lu s] saliendo...\n",
+    printf( "[%4lu s] exiting...\n",
             ( unsigned long ) ( xTaskGetTickCount() / configTICK_RATE_HZ ) );
     fflush( stdout );
 
@@ -344,12 +345,12 @@ static void vSensorTask( void * pvParameters )
         if( xQueueSend( xSensorQueue, &xReading, 0 ) != pdPASS )
         {
             xSemaphoreGive( xDropSemaphore );
-            vReportEvent( "cola de sensores llena: lectura descartada" );
+            vReportEvent( "sensor queue full: reading dropped" );
         }
 
-        /* Cola de longitud 1: xQueueOverwrite mantiene el ultimo valor
-         * accesible sin consumirlo (se publica aunque la cola principal
-         * estuviera llena). */
+        /* Length-1 queue: xQueueOverwrite keeps the latest value
+         * accessible without consuming it (it is published even if the
+         * main queue was full). */
         {
             QueueHandle_t xLatest = ( pxConfig->xId == SENSOR_TEMPERATURE ) ?
                                     xTempLatestQueue : xHumLatestQueue;
@@ -357,7 +358,8 @@ static void vSensorTask( void * pvParameters )
             ( void ) xQueueOverwrite( xLatest, &xReading );
         }
 
-        /* Cada sensor marca su bit; la tarea sync espera los dos (event group). */
+        /* Each sensor sets its own bit; the sync task waits for both
+         * (event group). */
         ( void ) xEventGroupSetBits( xSyncGroup,
                                      ( pxConfig->xId == SENSOR_TEMPERATURE ) ?
                                      SYNC_TEMP_BIT : SYNC_HUM_BIT );
@@ -382,8 +384,9 @@ static void vMonitorTask( void * pvParameters )
     {
         if( xMonitorHangDemo != pdFALSE )
         {
-            /* Demo 'w': simula la tarea colgada sin suspenderla (nunca
-             * retiene mutex ni cola): no late el watchdog ni consume. */
+            /* Demo 'w': simulates the task hanging without suspending it
+             * (it never holds a mutex or a queue): it neither beats the
+             * watchdog nor consumes. */
             vTaskDelay( pdMS_TO_TICKS( PAUSE_POLL_MS ) );
             continue;
         }
@@ -432,7 +435,7 @@ static void vMonitorTask( void * pvParameters )
                               xReading.ulSequence,
                               xReading.iValue,
                               pxConfig->pcUnit,
-                              ( xIsAlarm == pdTRUE ) ? "  <-- ALARMA" : "" );
+                              ( xIsAlarm == pdTRUE ) ? "  <-- ALARM" : "" );
             }
 
             if( xIsAlarm == pdTRUE )
@@ -442,8 +445,8 @@ static void vMonitorTask( void * pvParameters )
 
             if( xSlowConsumer != pdFALSE )
             {
-                /* Demo de presion inversa: consumidor lento, la cola se llena
-                 * y los descartados suben mientras dure la tecla k. */
+                /* Backpressure demo: slow consumer, the queue fills up
+                 * and the drop count rises while the k key is held. */
                 vTaskDelay( pdMS_TO_TICKS( SLOW_CONSUMER_MS ) );
             }
         }
@@ -469,8 +472,8 @@ static void vAlarmTask( void * pvParameters )
             xEventGroupSetBits( xEventGroup, ALARM_EVENT_BIT );
             xTaskNotifyGive( xStatsTaskHandle );
 
-            /* Por vReportEvent: actualiza ultimo evento, mensaje y events.csv. */
-            vReportEvent( "!! ALARMA activa: umbral superado (alarmas totales: %lu) !!",
+            /* Via vReportEvent: updates last event, message and events.csv. */
+            vReportEvent( "!! ALARM active: threshold exceeded (total alarms: %lu) !!",
                           ulAlarmTotal );
 
             vTaskDelay( pdMS_TO_TICKS( ALARM_HOLD_MS ) );
@@ -500,7 +503,7 @@ static void vAggregatorTask( void * pvParameters )
 
     for( ; ; )
     {
-        /* Queue set: espera a que actualice cualquiera de las dos colas. */
+        /* Queue set: waits until either of the two queues is updated. */
         xSignaled = ( QueueHandle_t ) xQueueSelectFromSet( xAggSet, pdMS_TO_TICKS( 1000 ) );
 
         if( xSignaled == NULL )
@@ -508,8 +511,8 @@ static void vAggregatorTask( void * pvParameters )
             continue;
         }
 
-        /* xQueuePeek mira el ultimo valor SIN consumirlo; xQueueReceive lo
-         * retira para que el set pueda senalar de nuevo. */
+        /* xQueuePeek looks at the latest value WITHOUT consuming it;
+         * xQueueReceive removes it so the set can signal again. */
         if( ( xQueuePeek( xSignaled, &xReading, 0 ) == pdPASS ) &&
             ( xQueueReceive( xSignaled, &xReading, 0 ) == pdPASS ) )
         {
@@ -527,7 +530,7 @@ static void vAggregatorTask( void * pvParameters )
             if( ( xHaveTemp != pdFALSE ) && ( xHaveHum != pdFALSE ) &&
                 ( xDashboardEnabled == pdFALSE ) )
             {
-                vPrintFormat( "aggreg: par listo temp=%d hum=%d (queue set + peek + receive)",
+                vPrintFormat( "aggreg: pair ready temp=%d hum=%d (queue set + peek + receive)",
                               xLastTemp.iValue, xLastHum.iValue );
                 xHaveTemp = pdFALSE;
                 xHaveHum = pdFALSE;
@@ -544,8 +547,8 @@ static void vSyncTask( void * pvParameters )
 
     for( ; ; )
     {
-        /* Espera a que AMBOS sensores hayan publicado; clear-on-exit
-         * borra los dos bits para el ciclo siguiente. */
+        /* Waits until BOTH sensors have published; clear-on-exit wipes
+         * both bits for the next cycle. */
         xBits = xEventGroupWaitBits( xSyncGroup,
                                      SYNC_TEMP_BIT | SYNC_HUM_BIT,
                                      pdTRUE,
@@ -556,7 +559,7 @@ static void vSyncTask( void * pvParameters )
              ( SYNC_TEMP_BIT | SYNC_HUM_BIT ) ) &&
             ( xDashboardEnabled == pdFALSE ) )
         {
-            vPrintFormat( "sync: lecturas de temp y hum coordinadas (event group, 2 bits)" );
+            vPrintFormat( "sync: temp and hum readings coordinated (event group, 2 bits)" );
         }
     }
 }
@@ -715,7 +718,7 @@ static void vStatsTask( void * pvParameters )
 
             xBits = xEventGroupGetBits( xEventGroup );
 
-            vPrintFormat( "stats: lecturas=%lu alarmas=%lu perdidas=%lu picos=%lu cola=%u/%u heap_libre=%zu B tareas=%u eventos=%s",
+            vPrintFormat( "stats: readings=%lu alarms=%lu dropped=%lu spikes=%lu queue=%u/%u heap_free=%zu B tasks=%u events=%s",
                           ulReadings,
                           ulAlarms,
                           ulDropped,
@@ -724,17 +727,17 @@ static void vStatsTask( void * pvParameters )
                           ( unsigned int ) SENSOR_QUEUE_LENGTH,
                           xPortGetFreeHeapSize(),
                           ( unsigned int ) uxTaskGetNumberOfTasks(),
-                          ( xBits & ALARM_EVENT_BIT ) ? "ALARMA" : "normal" );
+                          ( xBits & ALARM_EVENT_BIT ) ? "ALARM" : "normal" );
 
             ulBusy = ulBusyPercentX10();
-            vPrintFormat( "cpu: sistema ocupado %lu.%lu%%", ulBusy / 10UL, ulBusy % 10UL );
+            vPrintFormat( "cpu: system busy %lu.%lu%%", ulBusy / 10UL, ulBusy % 10UL );
 
-            vPrintFormat( "watchdog: %s  fallos=%lu  log_perdidas=%lu",
-                          ( xWdActive != pdFALSE ) ? "ALERTA" : "ok",
+            vPrintFormat( "watchdog: %s  fails=%lu  log_dropped=%lu",
+                          ( xWdActive != pdFALSE ) ? "ALERT" : "ok",
                           ulWdFails,
                           ulLogDrops );
 
-            vPrintFormat( "stack minima libre (palabras): monitor=%u alarm=%u stats=%u",
+            vPrintFormat( "stack min free (words): monitor=%u alarm=%u stats=%u",
                           ( unsigned int ) uxTaskGetStackHighWaterMark( xMonitorTaskHandle ),
                           ( unsigned int ) uxTaskGetStackHighWaterMark( xAlarmTaskHandle ),
                           ( unsigned int ) uxTaskGetStackHighWaterMark( xStatsTaskHandle ) );
@@ -748,9 +751,9 @@ static void vSpikeTimerCallback( TimerHandle_t xTimer )
 
     if( xQueueForcedReading( &xTempSensor, &uiSpikeSeed ) == pdPASS )
     {
-        /* Sin mutex: el callback corre en Tmr Svc (prioridad maxima) y
-         * bloquearse aqui pararia todos los timers. Escritura atomica;
-         * las leidas (stats, HTTP) ocurren bajo xStateMutex. */
+        /* No mutex: the callback runs in Tmr Svc (highest priority) and
+         * blocking here would stall every timer. The write is atomic;
+         * the reads (stats, HTTP) happen under xStateMutex. */
         ( void ) __atomic_add_fetch( &xSystemState.ulSpikes, 1U, __ATOMIC_RELAXED );
     }
     else
@@ -763,7 +766,7 @@ void vApplicationStackOverflowHook( TaskHandle_t xTask,
                                     char * pcTaskName )
 {
     ( void ) xTask;
-    fprintf( stderr, "STACK OVERFLOW en tarea %s\n", pcTaskName );
+    fprintf( stderr, "STACK OVERFLOW in task %s\n", pcTaskName );
     fflush( stderr );
     vRestoreTerminal();
     abort();
@@ -771,7 +774,7 @@ void vApplicationStackOverflowHook( TaskHandle_t xTask,
 
 void vApplicationMallocFailedHook( void )
 {
-    fprintf( stderr, "pvPortMalloc ha fallado\n" );
+    fprintf( stderr, "pvPortMalloc failed\n" );
     fflush( stderr );
     vRestoreTerminal();
     abort();
@@ -780,7 +783,7 @@ void vApplicationMallocFailedHook( void )
 void vAssertCalled( const char * pcFile,
                     int iLine )
 {
-    fprintf( stderr, "configASSERT fallido en %s:%d\n", pcFile, iLine );
+    fprintf( stderr, "configASSERT failed at %s:%d\n", pcFile, iLine );
     fflush( stderr );
     vRestoreTerminal();
     abort();
@@ -815,7 +818,7 @@ int main( void )
 
     if( xDashboardEnabled == pdFALSE )
     {
-        printf( "=== Estacion de sensores FreeRTOS (puerto POSIX) ===\n" );
+        printf( "=== Sensor station FreeRTOS (POSIX port) ===\n" );
         printf( "%s\n\n", pcHelpText );
     }
 
@@ -828,8 +831,8 @@ int main( void )
     xDropSemaphore = xSemaphoreCreateCounting( DROP_COUNT_MAX, 0 );
     xInvBinary = xSemaphoreCreateBinary();
     xInvMutex = xSemaphoreCreateMutex();
-    /* El semaforo binario arranca vacio: lo dejamos disponible para que
-     * la tarea BAJA pueda cogerlo en la demo de inversion de prioridades. */
+    /* The binary semaphore starts empty: we make it available so the LOW
+     * task can take it in the priority inversion demo. */
     configASSERT( xSemaphoreGive( xInvBinary ) == pdPASS );
     xEventGroup = xEventGroupCreate();
     xSyncGroup = xEventGroupCreate();
@@ -851,7 +854,7 @@ int main( void )
     configASSERT( xQueueAddToSet( xHumLatestQueue, xAggSet ) == pdPASS );
 
     memset( &xSystemState, 0, sizeof( xSystemState ) );
-    strcpy( xSystemState.pcLastEvent, "sistema iniciado" );
+    strcpy( xSystemState.pcLastEvent, "system started" );
 
     xResult = xTaskCreate( vSensorTask, "temp", configMINIMAL_STACK_SIZE,
                             ( void * ) &xTempSensor, PRIORITY_SENSOR, &xTempTaskHandle );
@@ -877,7 +880,7 @@ int main( void )
                             NULL, PRIORITY_COMMAND, &xCommandTaskHandle );
     configASSERT( xResult == pdPASS );
 
-    /* Logger con alojamiento estatico (TCB y pila propios, sin pvPortMalloc). */
+    /* Logger with static allocation (own TCB and stack, no pvPortMalloc). */
     xLoggerTaskHandle = xTaskCreateStatic( vLoggerTask, "logger", configMINIMAL_STACK_SIZE,
                                             NULL, PRIORITY_LOGGER,
                                             xLoggerStack, &xLoggerTcb );
@@ -920,6 +923,6 @@ int main( void )
 
     vTaskStartScheduler();
 
-    fprintf( stderr, "Error: el scheduler no arranco\n" );
+    fprintf( stderr, "Error: the scheduler did not start\n" );
     return 1;
 }

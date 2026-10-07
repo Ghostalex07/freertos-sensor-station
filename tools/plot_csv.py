@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Genera docs/chart.svg a partir de readings.csv, sin dependencias externas.
+"""Generates docs/chart.svg from readings.csv, with no external deps.
 
-Uso:  python3 tools/plot_csv.py [readings.csv] [chart.svg]
+Usage:  python3 tools/plot_csv.py [readings.csv] [chart.svg]
 """
 import csv
 import sys
@@ -27,18 +27,18 @@ def load(path):
         for row in csv.DictReader(f):
             try:
                 t = int(row["epoch_ms"])
-                v = int(row["valor"])
+                v = int(row["value"])
             except (KeyError, ValueError):
                 continue
-            if row["sensor"] == "temperatura":
+            if row["sensor"] == "temperature":
                 temp.append((t, v))
-            elif row["sensor"] == "humedad":
+            elif row["sensor"] == "humidity":
                 hum.append((t, v))
     return temp, hum
 
 
 def panel(series, t0, span, y0, y1, vmin, vmax, color, label, threshold):
-    """Devuelve el SVG de un panel (rejilla, serie y umbral)."""
+    """Returns the SVG of one panel (grid, series and threshold)."""
     out = []
     pw = W - 2 * MARGIN
 
@@ -68,7 +68,7 @@ def panel(series, t0, span, y0, y1, vmin, vmax, color, label, threshold):
                    f'stroke="{COLOR_BAD}" stroke-dasharray="6,4"/>')
         out.append(f'<text x="{W - MARGIN - 4}" y="{y - 5:.1f}" fill="{COLOR_BAD}" '
                    f'font-size="11" text-anchor="end" '
-                   f'font-family="monospace">umbral {threshold}</text>')
+                   f'font-family="monospace">threshold {threshold}</text>')
 
     if series:
         pts = " ".join(f"{px(t):.1f},{py(v):.1f}" for t, v in series)
@@ -88,7 +88,7 @@ def main():
     all_pts = temp + hum
 
     if len(all_pts) < 2:
-        print(f"pocos datos en {src} ({len(all_pts)} filas), no se genera grafica")
+        print(f"not enough data in {src} ({len(all_pts)} rows), chart not generated")
         return 1
 
     t0 = min(t for t, _ in all_pts)
@@ -100,13 +100,13 @@ def main():
         f'viewBox="0 0 {W} {H}" font-family="monospace">',
         f'<rect width="{W}" height="{H}" fill="{COLOR_BG}"/>',
         f'<text x="{MARGIN}" y="24" fill="{COLOR_TEXT}" font-size="14" '
-        f'font-weight="bold">Estacion FreeRTOS: temperatura y humedad</text>',
+        f'font-weight="bold">FreeRTOS station: temperature and humidity</text>',
         f'<text x="{W - MARGIN}" y="24" fill="{COLOR_TEXT}" font-size="11" '
         f'text-anchor="end">readings.csv ({len(temp)} temp / {len(hum)} hum)</text>',
         panel(temp, t0, span, 44, 160, TEMP_MIN, TEMP_MAX, COLOR_TEMP,
-              "temperatura (C)", TEMP_THRESHOLD),
+              "temperature (C)", TEMP_THRESHOLD),
         panel(hum, t0, span, 196, 300, HUM_MIN, HUM_MAX, COLOR_HUM,
-              "humedad (%)", HUM_THRESHOLD),
+              "humidity (%)", HUM_THRESHOLD),
         f'<text x="{MARGIN}" y="{H - 6}" fill="{COLOR_TEXT}" font-size="11">'
         f'0 s</text>',
         f'<text x="{W - MARGIN}" y="{H - 6}" fill="{COLOR_TEXT}" font-size="11" '

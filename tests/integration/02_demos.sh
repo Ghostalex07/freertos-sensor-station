@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 02_demos.sh — demo de watchdog (w), inversion de prioridades (i) y
-# prioridades con vTaskPrioritySet (v). Las demos siguen activas al salir.
-# ~10 s.
+# 02_demos.sh — watchdog demo (w), priority inversion (i) and
+# priorities with vTaskPrioritySet (v). The demos are still active at
+# exit. ~10 s.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 resolve_bin "${1:-}"
@@ -9,84 +9,84 @@ begin 8
 new_case
 start_bin
 
-if ! wait_for '=== Estacion de sensores FreeRTOS \(puerto POSIX\) ===' out.log 3; then
-    fail "arranque del binario" "$(tail -n 20 out.log 2>/dev/null)"
+if ! wait_for '=== Sensor station FreeRTOS \(POSIX port\) ===' out.log 3; then
+    fail "binary startup" "$(tail -n 20 out.log 2>/dev/null)"
     finish
     exit 1
 fi
 
-# 1) w -> el monitor deja de latir
+# 1) w -> the monitor stops beating
 send_key 'w'
-if wait_for 'demo vigia: monitor detenido sin latido' out.log 3; then
-    ok "tecla w detiene el latido del monitor"
+if wait_for 'watchdog demo: monitor stopped without beating' out.log 3; then
+    ok "key w stops the monitor heartbeat"
 else
-    fail "tecla w detiene el latido del monitor" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key w stops the monitor heartbeat" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 2) el watchdog detecta al monitor (WATCHDOG_TIMEOUT_MS=5000)
-if wait_for "WATCHDOG: tarea 'monitor' sin latido" out.log 10; then
-    ok "watchdog detecta al monitor sin latido (<=10 s)"
+# 2) the watchdog detects the monitor (WATCHDOG_TIMEOUT_MS=5000)
+if wait_for "WATCHDOG: task 'monitor' failed to beat" out.log 10; then
+    ok "watchdog flags the monitor without beats (<=10 s)"
 else
-    fail "watchdog detecta al monitor sin latido (<=10 s)" \
+    fail "watchdog flags the monitor without beats (<=10 s)" \
         "$(tail -n 15 out.log 2>/dev/null)"
 fi
 
-# 3) w -> el monitor vuelve a latir
+# 3) w -> the monitor beats again
 send_key 'w'
-if wait_for 'demo vigia: monitor reanudado' out.log 3; then
-    ok "tecla w reanuda el monitor"
+if wait_for 'watchdog demo: monitor resumed' out.log 3; then
+    ok "key w resumes the monitor"
 else
-    fail "tecla w reanuda el monitor" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key w resumes the monitor" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 4) el watchdog confirma la recuperacion
-if wait_for "WATCHDOG: tarea 'monitor' recupero el latido" out.log 6; then
-    ok "watchdog confirma la recuperacion del latido (<=6 s)"
+# 4) the watchdog confirms the recovery
+if wait_for "WATCHDOG: task 'monitor' beat resumed" out.log 6; then
+    ok "watchdog confirms the heartbeat recovery (<=6 s)"
 else
-    fail "watchdog confirma la recuperacion del latido (<=6 s)" \
+    fail "watchdog confirms the heartbeat recovery (<=6 s)" \
         "$(tail -n 15 out.log 2>/dev/null)"
 fi
 
-# 5) i -> demo de inversion de prioridades
+# 5) i -> priority inversion demo
 send_key 'i'
-if wait_for 'inversion: demo iniciada' out.log 3; then
-    ok "tecla i inicia la demo de inversion"
+if wait_for 'inversion: demo started' out.log 3; then
+    ok "key i starts the inversion demo"
 else
-    fail "tecla i inicia la demo de inversion" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key i starts the inversion demo" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 6) ambas fases terminan (el semaforo binario y el mutex);
-#    se espera por la ultima (se imprime despues) y se verifican las dos.
-if wait_for 'inversion: mutex .* la ALTA espero' out.log 6 &&
-    LC_ALL=C grep -aq 'inversion: semaforo binario .* la ALTA espero' out.log; then
-    ok "la demo de inversion imprime semaforo binario y mutex"
+# 6) both phases finish (binary semaphore and mutex); we wait for the
+#    last one (printed afterwards) and verify both.
+if wait_for 'inversion: mutex .* HIGH task waited' out.log 6 &&
+    LC_ALL=C grep -aq 'inversion: binary semaphore .* HIGH task waited' out.log; then
+    ok "the inversion demo prints binary semaphore and mutex"
 else
-    fail "la demo de inversion imprime semaforo binario y mutex" \
+    fail "the inversion demo prints binary semaphore and mutex" \
         "$(grep -a 'inversion:' out.log 2>/dev/null | tail -n 5)"
 fi
 
-# 7) v -> prioridad del monitor bajada con vTaskPrioritySet
+# 7) v -> monitor priority lowered with vTaskPrioritySet
 send_key 'v'
-if wait_for 'prioridades: monitor bajado de' out.log 3; then
-    ok "tecla v baja la prioridad del monitor con vTaskPrioritySet"
+if wait_for 'priorities: monitor lowered from' out.log 3; then
+    ok "key v lowers the monitor priority with vTaskPrioritySet"
 else
-    fail "tecla v baja la prioridad del monitor con vTaskPrioritySet" \
+    fail "key v lowers the monitor priority with vTaskPrioritySet" \
         "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 8) q -> rc=0 con las demos aun activas (valida que nada cuelga)
+# 8) q -> rc=0 with the demos still active (proves nothing hangs)
 send_key 'q'
 sal=0
-wait_for 'saliendo' out.log 5 && sal=1
+wait_for 'exiting' out.log 5 && sal=1
 gone=0
 wait_gone "$PID" 5 && gone=1
 stop_bin
 rc=$?
 if [ "$sal" -eq 1 ] && [ "$gone" -eq 1 ] && [ "$rc" -eq 0 ]; then
-    ok "tecla q sale con rc=0 con las demos activas"
+    ok "key q exits with rc=0 with the demos active"
 else
-    fail "tecla q sale con rc=0 con las demos activas" \
-        "rc=$rc saliendo=$sal terminado=$gone" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key q exits with rc=0 with the demos active" \
+        "rc=$rc exiting=$sal finished=$gone" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
 finish

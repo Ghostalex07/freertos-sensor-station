@@ -1,11 +1,11 @@
 #ifndef DEMOS_H
 #define DEMOS_H
 
-/* Tarea de comandos y demos interactivas (inversion, prioridades...).
- * vInversionDemoTask no se declara aqui: es privada de demos.c, la crea
- * la propia tarea de comandos con la tecla 'i'. */
+/* Command task and interactive demos (inversion, priorities...).
+ * vInversionDemoTask is not declared here: it is private to demos.c and
+ * the command task itself creates it with the 'i' key. */
 
-/* Ayuda de teclas que imprime la tarea de comandos ('?') y el banner. */
+/* Key help printed by the command task ('?') and the banner. */
 extern const char * pcHelpText;
 
 void vCommandTask( void * pvParameters );

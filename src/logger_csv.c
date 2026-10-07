@@ -1,9 +1,9 @@
-/* Registro CSV de la estacion de sensores.
+/* CSV logging of the sensor station.
  *
- * vLoggerTask consume dos fuentes independientes:
- *  - xReadingStream (stream buffer): lecturas de los sensores.
- *  - xEventMessage  (message buffer): eventos de vReportEvent().
- * readings.csv se rota (a readings.1.csv) al pasar de CSV_ROTATE_BYTES. */
+ * vLoggerTask consumes two independent sources:
+ *  - xReadingStream (stream buffer): sensor readings.
+ *  - xEventMessage  (message buffer): vReportEvent() events.
+ * readings.csv rotates (to readings.1.csv) past CSV_ROTATE_BYTES. */
 
 #include <FreeRTOS.h>
 
@@ -16,8 +16,8 @@
 #include "watchdog.h"
 #include "logger_csv.h"
 
-/* Logger con alojamiento estatico: TCB y pila propios, sin pvPortMalloc.
- * main.c los referencia al crear la tarea con xTaskCreateStatic(). */
+/* Logger with static allocation: own TCB and stack, no pvPortMalloc.
+ * main.c references them when creating the task with xTaskCreateStatic(). */
 StackType_t xLoggerStack[ configMINIMAL_STACK_SIZE ];
 StaticTask_t xLoggerTcb;
 
@@ -49,15 +49,15 @@ void vLoggerTask( void * pvParameters )
 
         pxReadings = NULL;
         pxEvents = NULL;
-        vReportEvent( "logger: no se pudo abrir los CSV, registro desactivado" );
+        vReportEvent( "logger: could not open the CSV files, logging disabled" );
     }
     else
     {
-        ( void ) fprintf( pxReadings, "epoch_ms,sensor,valor,secuencia,alarma\n" );
-        ( void ) fprintf( pxEvents, "epoch_ms,evento\n" );
+        ( void ) fprintf( pxReadings, "epoch_ms,sensor,value,sequence,alarm\n" );
+        ( void ) fprintf( pxEvents, "epoch_ms,event\n" );
         fflush( pxReadings );
         fflush( pxEvents );
-        vReportEvent( "logger: CSV activo (%s y %s)", CSV_READINGS_PATH, CSV_EVENTS_PATH );
+        vReportEvent( "logger: CSV active (%s and %s)", CSV_READINGS_PATH, CSV_EVENTS_PATH );
     }
 
     for( ; ; )
@@ -87,7 +87,7 @@ void vLoggerTask( void * pvParameters )
 
             if( ulReadingsBytes >= CSV_ROTATE_BYTES )
             {
-                /* Rotacion: el fichero actual pasa a readings.1.csv. */
+                /* Rotation: the current file becomes readings.1.csv. */
                 fclose( pxReadings );
                 ( void ) rename( CSV_READINGS_PATH, "readings.1.csv" );
                 pxReadings = fopen( CSV_READINGS_PATH, "w" );
@@ -95,13 +95,13 @@ void vLoggerTask( void * pvParameters )
                 if( pxReadings != NULL )
                 {
                     ulReadingsBytes = ( unsigned long ) fprintf(
-                        pxReadings, "epoch_ms,sensor,valor,secuencia,alarma\n" );
+                        pxReadings, "epoch_ms,sensor,value,sequence,alarm\n" );
                     fflush( pxReadings );
-                    vReportEvent( "logger: readings.csv rotado (>64 KiB, respaldo en readings.1.csv)" );
+                    vReportEvent( "logger: readings.csv rotated (>64 KiB, backup in readings.1.csv)" );
                 }
                 else
                 {
-                    vReportEvent( "logger: rotacion fallo, CSV de lecturas desactivado" );
+                    vReportEvent( "logger: rotation failed, readings CSV disabled" );
                 }
             }
         }

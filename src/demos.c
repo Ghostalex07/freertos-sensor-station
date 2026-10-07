@@ -1,8 +1,8 @@
-/* Tarea de comandos (teclado) y demos interactivas de la estacion.
+/* Keyboard command task and interactive demos of the station.
  *
- * vCommandTask traduce cada tecla en una accion sobre el estado global:
- * pausas, alarmas forzadas y arranque de las demos de prioridades (v),
- * inversion de prioridades (i), presion inversa (k) y vigia (w). */
+ * vCommandTask translates every key into an action on the global state:
+ * pauses, forced alarms and the start of the priority demos (v),
+ * priority inversion (i), backpressure (k) and watchdog (w). */
 
 #include <errno.h>
 #include <stdio.h>
@@ -18,11 +18,11 @@
 #include "demos.h"
 
 const char * pcHelpText =
-    "teclas: [t]=temp alarma [h]=hum alarma [p]=pausa [c]=continua [r]=reset [d]=dashboard\n"
-    "        [w]=vigia [i]=inversion [v]=prioridad [k]=presion [s]=tareas [q]=salir [?]=ayuda";
+    "keys: [t]=temp alarm [h]=hum alarm [p]=pause [c]=continue [r]=reset [d]=dashboard\n"
+    "      [w]=watchdog [i]=inversion [v]=priority [k]=backpressure [s]=tasks [q]=exit [?]=help";
 
-/* Estado de las demos interactivas (teclas v, i, ...): privado de este
- * fichero, solo lo tocan vCommandTask y las tareas de inversion. */
+/* State of the interactive demos (v, i, ... keys): private to this file,
+ * only vCommandTask and the inversion tasks touch it. */
 volatile BaseType_t xMonitorPrioDemo = pdFALSE;
 volatile BaseType_t xInvDemoRunning = pdFALSE;
 volatile int iInvPhase = 0;
@@ -47,8 +47,8 @@ void vInvLowTask( void * pvParameters )
         ( void ) xSemaphoreTake( xLock, portMAX_DELAY );
         ( void ) xEventGroupSetBits( xInvEvents, INV_HELD );
 
-        /* Trabajo en bucle con yield: la tarea sigue "lista" mientras
-         * sostiene el lock (clave para la demo de inversion). */
+        /* Busy work with yield: the task stays "ready" while it holds
+         * the lock (key to the inversion demo). */
         for( i = 0; i < INV_WORK_ITERS; i++ )
         {
             taskYIELD();
@@ -71,7 +71,7 @@ void vInvMedTask( void * pvParameters )
 
         xStart = xTaskGetTickCount();
 
-        /* Ocupa la CPU ~1 s; con prioridad 2 hunde a la BAJA (1). */
+        /* Hogs the CPU for ~1 s; at priority 2 it sinks the LOW one (1). */
         while( ( xTaskGetTickCount() - xStart ) < pdMS_TO_TICKS( INV_MED_MS ) )
         {
             volatile int iSpin;
@@ -142,9 +142,9 @@ static void vInversionDemoTask( void * pvParameters )
                                       pdTRUE, pdTRUE, portMAX_DELAY );
     }
 
-    vReportEvent( "inversion: semaforo binario (sin herencia) -> la ALTA espero %d ms",
+    vReportEvent( "inversion: binary semaphore (no inheritance) -> the HIGH task waited %d ms",
                   iInvDtMs[ 0 ] );
-    vReportEvent( "inversion: mutex (herencia de prioridades) -> la ALTA espero %d ms",
+    vReportEvent( "inversion: mutex (priority inheritance) -> the HIGH task waited %d ms",
                   iInvDtMs[ 1 ] );
 
     iInvPhase = 0;
@@ -173,7 +173,7 @@ void vCommandTask( void * pvParameters )
         {
             vTaskPrioritySet( xMonitorTaskHandle, PRIORITY_MONITOR );
             xMonitorPrioDemo = pdFALSE;
-            vReportEvent( "prioridades: monitor restaurado a prioridad %d",
+            vReportEvent( "priorities: monitor restored to priority %d",
                           PRIORITY_MONITOR );
         }
 
@@ -191,13 +191,13 @@ void vCommandTask( void * pvParameters )
 
                         if( xQueueForcedReading( pxConfig, &uiCommandSeed ) == pdPASS )
                         {
-                            vReportEvent( "manual: inyectada lectura de %s forzada",
+                            vReportEvent( "manual: injected forced %s reading",
                                           pxConfig->pcName );
                         }
                         else
                         {
                             xSemaphoreGive( xDropSemaphore );
-                            vReportEvent( "manual: cola llena, lectura forzada descartada" );
+                            vReportEvent( "manual: queue full, forced reading dropped" );
                         }
 
                         break;
@@ -206,36 +206,37 @@ void vCommandTask( void * pvParameters )
                         xSemaphoreTake( xStateMutex, portMAX_DELAY );
                         xSystemState.ulAlarms = 0;
                         xSemaphoreGive( xStateMutex );
-                        vReportEvent( "manual: contador de alarmas reiniciado" );
+                        vReportEvent( "manual: alarm counter reset" );
                         break;
 
                     case 'p':
                         xSemaphoreTake( xStateMutex, portMAX_DELAY );
                         xSystemState.xSensorsPaused = pdTRUE;
                         xSemaphoreGive( xStateMutex );
-                        vReportEvent( "manual: sensores pausados" );
+                        vReportEvent( "manual: sensors paused" );
                         break;
 
                     case 'c':
                         xSemaphoreTake( xStateMutex, portMAX_DELAY );
                         xSystemState.xSensorsPaused = pdFALSE;
                         xSemaphoreGive( xStateMutex );
-                        vReportEvent( "manual: sensores reanudados" );
+                        vReportEvent( "manual: sensors resumed" );
                         break;
 
                     case 'w':
-                        /* Nunca vTaskSuspend: si monitor se suspendiera con
-                         * xPrintMutex/xStateMutex colgaria todo el sistema. */
+                        /* Never vTaskSuspend: if monitor suspended while
+                         * holding xPrintMutex/xStateMutex the whole system
+                         * would hang. */
                         xMonitorHangDemo = ( xMonitorHangDemo == pdFALSE ) ? pdTRUE : pdFALSE;
-                        vReportEvent( "demo vigia: monitor %s (el watchdog %s)",
-                                      ( xMonitorHangDemo != pdFALSE ) ? "detenido sin latido" : "reanudado",
-                                      ( xMonitorHangDemo != pdFALSE ) ? "lo detectara" : "confirmara el latido" );
+                        vReportEvent( "watchdog demo: monitor %s (the watchdog %s)",
+                                      ( xMonitorHangDemo != pdFALSE ) ? "stopped without beating" : "resumed",
+                                      ( xMonitorHangDemo != pdFALSE ) ? "will detect it" : "will confirm the beat" );
                         break;
 
                     case 'k':
                         xSlowConsumer = ( xSlowConsumer == pdFALSE ) ? pdTRUE : pdFALSE;
-                        vReportEvent( "presion inversa: consumidor lento %s (%d s por lectura)",
-                                      ( xSlowConsumer != pdFALSE ) ? "ACTIVADO" : "desactivado",
+                        vReportEvent( "backpressure: slow consumer %s (%d s per reading)",
+                                      ( xSlowConsumer != pdFALSE ) ? "ENABLED" : "disabled",
                                       SLOW_CONSUMER_MS / 1000 );
                         break;
 
@@ -246,14 +247,14 @@ void vCommandTask( void * pvParameters )
                             xMonitorPrioDemo = pdTRUE;
                             xPrioDemoDeadline = xTaskGetTickCount() +
                                                 pdMS_TO_TICKS( PRIORITY_DEMO_MS );
-                            vReportEvent( "prioridades: monitor bajado de %d a %d con vTaskPrioritySet (5 s)",
+                            vReportEvent( "priorities: monitor lowered from %d to %d with vTaskPrioritySet (5 s)",
                                           PRIORITY_MONITOR, PRIORITY_STATS );
                         }
                         else
                         {
                             vTaskPrioritySet( xMonitorTaskHandle, PRIORITY_MONITOR );
                             xMonitorPrioDemo = pdFALSE;
-                            vReportEvent( "prioridades: monitor restaurado a prioridad %d",
+                            vReportEvent( "priorities: monitor restored to priority %d",
                                           PRIORITY_MONITOR );
                         }
                         break;
@@ -261,7 +262,7 @@ void vCommandTask( void * pvParameters )
                     case 'i':
                         if( xInvDemoRunning != pdFALSE )
                         {
-                            vReportEvent( "inversion: la demo ya esta en curso" );
+                            vReportEvent( "inversion: the demo is already running" );
                         }
                         else
                         {
@@ -275,11 +276,11 @@ void vCommandTask( void * pvParameters )
                             if( xCreated == pdPASS )
                             {
                                 xInvDemoRunning = pdTRUE;
-                                vReportEvent( "inversion: demo iniciada (semforo binario vs mutex, ~2 s)" );
+                                vReportEvent( "inversion: demo started (binary semaphore vs mutex, ~2 s)" );
                             }
                             else
                             {
-                                vReportEvent( "inversion: no se pudo crear la tarea de demo" );
+                                vReportEvent( "inversion: could not create the demo task" );
                             }
                         }
                         break;
@@ -296,7 +297,7 @@ void vCommandTask( void * pvParameters )
                         {
                             ( void ) fputs( pcTaskListBuffer, pxTasksFile );
                             fclose( pxTasksFile );
-                            vReportEvent( "tareas: volcado en tasks.txt (vTaskList)" );
+                            vReportEvent( "tasks: dump written to tasks.txt (vTaskList)" );
 
                             if( xDashboardEnabled == pdFALSE )
                             {
@@ -308,7 +309,7 @@ void vCommandTask( void * pvParameters )
                         }
                         else
                         {
-                            vReportEvent( "tareas: no se pudo escribir tasks.txt" );
+                            vReportEvent( "tasks: could not write tasks.txt" );
                         }
 
                         break;
@@ -317,7 +318,7 @@ void vCommandTask( void * pvParameters )
                     case 'd':
                         if( xStdoutIsTty == pdFALSE )
                         {
-                            vReportEvent( "dashboard no disponible sin terminal" );
+                            vReportEvent( "dashboard unavailable without a terminal" );
                             break;
                         }
 
@@ -329,8 +330,8 @@ void vCommandTask( void * pvParameters )
                         xSemaphoreGive( xPrintMutex );
 
                         xTaskNotifyGive( xStatsTaskHandle );
-                        vReportEvent( "manual: modo %s activado",
-                                      ( xDashboardEnabled != pdFALSE ) ? "dashboard" : "linea" );
+                        vReportEvent( "manual: %s mode enabled",
+                                      ( xDashboardEnabled != pdFALSE ) ? "dashboard" : "line" );
                         break;
 
                     case 'q':
@@ -354,13 +355,13 @@ void vCommandTask( void * pvParameters )
                 if( xStdinIsTty == pdFALSE )
                 {
                     xStdinClosed = pdTRUE;
-                    vReportEvent( "stdin cerrado: comandos desactivados (senal para salir)" );
+                    vReportEvent( "stdin closed: commands disabled (signal to exit)" );
                 }
             }
             else if( errno != EINTR )
             {
                 xStdinClosed = pdTRUE;
-                vReportEvent( "error leyendo stdin: comandos desactivados" );
+                vReportEvent( "error reading stdin: commands disabled" );
             }
         }
 

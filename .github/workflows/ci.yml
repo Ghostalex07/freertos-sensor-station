@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-fetchcontent:
-    name: build-fetchcontent (kernel via FetchContent, con red)
+    name: build-fetchcontent (kernel via FetchContent, with network)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -21,9 +21,10 @@ jobs:
       - name: Toolchain versions
         run: cmake --version && gcc --version
 
-      # Cachea el clon de FreeRTOS-Kernel que descarga FetchContent en
-      # build/_deps (localizacion por defecto) para reutilizarlo entre runs.
-      # La clave lleva el tag para nunca restaurar un kernel de otra version.
+      # Caches the FreeRTOS-Kernel clone that FetchContent downloads into
+      # build/_deps (default location) so it is reused between runs. The
+      # key carries the tag so a kernel from another version is never
+      # restored.
       - name: Cache FetchContent (build/_deps)
         uses: actions/cache@v5
         with:
@@ -32,7 +33,7 @@ jobs:
           restore-keys: |
             fetchcontent-V11.3.1-${{ runner.os }}-
 
-      - name: Configure (FetchContent, con red)
+      - name: Configure (FetchContent, with network)
         run: cmake -S . -B build
 
       - name: Build
@@ -45,24 +46,24 @@ jobs:
         run: |
           rc=0
           timeout -k 1 6 ./build/sensor_station </dev/null > out.log 2>&1 || rc=$?
-          echo "exit code: $rc (124 = terminado por timeout = esperado)"
+          echo "exit code: $rc (124 = killed by timeout = expected)"
           cat out.log
           if [ "$rc" -ne 124 ] && [ "$rc" -ne 0 ]; then
-            echo "::error::sensor_station termino con codigo inesperado: $rc"
+            echo "::error::sensor_station exited with an unexpected code: $rc"
             exit 1
           fi
-          if ! grep -q "temperatura" out.log; then
-            echo "::error::'temperatura' no aparece en la salida"
+          if ! grep -q "temperature" out.log; then
+            echo "::error::'temperature' does not appear in the output"
             exit 1
           fi
           if ! grep -q "stats:" out.log; then
-            echo "::error::'stats:' no aparece en la salida"
+            echo "::error::'stats:' does not appear in the output"
             exit 1
           fi
           echo "Smoke test OK"
 
-      # Suite de integracion TAP (bash, sin dependencias). Secuencial: el
-      # puerto HTTP 8080 es fijo en C, nunca se ejecuta en paralelo.
+      # TAP integration suite (bash, no dependencies). Sequential: the
+      # HTTP port 8080 is fixed in C, it never runs in parallel.
       - name: Integration tests
         env:
           SENSOR_STATION_SEED: "42"
@@ -78,7 +79,7 @@ jobs:
           if-no-files-found: ignore
 
   build-kernel-local:
-    name: build-kernel-local (kernel local, sin red)
+    name: build-kernel-local (local kernel, offline)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -95,7 +96,7 @@ jobs:
       - name: Toolchain versions
         run: cmake --version && gcc --version
 
-      - name: Configure (kernel local, sin FetchContent)
+      - name: Configure (local kernel, without FetchContent)
         run: cmake -S . -B build -DFREERTOS_KERNEL_PATH="${{ github.workspace }}/kernel"
 
       - name: Build
@@ -108,24 +109,24 @@ jobs:
         run: |
           rc=0
           timeout -k 1 6 ./build/sensor_station </dev/null > out.log 2>&1 || rc=$?
-          echo "exit code: $rc (124 = terminado por timeout = esperado)"
+          echo "exit code: $rc (124 = killed by timeout = expected)"
           cat out.log
           if [ "$rc" -ne 124 ] && [ "$rc" -ne 0 ]; then
-            echo "::error::sensor_station termino con codigo inesperado: $rc"
+            echo "::error::sensor_station exited with an unexpected code: $rc"
             exit 1
           fi
-          if ! grep -q "temperatura" out.log; then
-            echo "::error::'temperatura' no aparece en la salida"
+          if ! grep -q "temperature" out.log; then
+            echo "::error::'temperature' does not appear in the output"
             exit 1
           fi
           if ! grep -q "stats:" out.log; then
-            echo "::error::'stats:' no aparece en la salida"
+            echo "::error::'stats:' does not appear in the output"
             exit 1
           fi
           echo "Smoke test OK"
 
-      # Suite de integracion TAP (bash, sin dependencias). Secuencial: el
-      # puerto HTTP 8080 es fijo en C, nunca se ejecuta en paralelo.
+      # TAP integration suite (bash, no dependencies). Sequential: the
+      # HTTP port 8080 is fixed in C, it never runs in parallel.
       - name: Integration tests
         env:
           SENSOR_STATION_SEED: "42"
@@ -141,7 +142,7 @@ jobs:
           if-no-files-found: ignore
 
   build-asan:
-    name: build-asan (kernel local, ASan + UBSan)
+    name: build-asan (local kernel, ASan + UBSan)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -168,30 +169,30 @@ jobs:
       - name: Unit tests (ctest)
         run: ctest --test-dir build --output-on-failure
 
-      - name: Smoke test instrumentado
+      - name: Instrumented smoke test
         env:
           SENSOR_STATION_SEED: "42"
         run: |
           rc=0
           timeout -k 1 6 ./build/sensor_station </dev/null > out.log 2>&1 || rc=$?
-          echo "exit code: $rc (124 = terminado por timeout = esperado)"
+          echo "exit code: $rc (124 = killed by timeout = expected)"
           cat out.log
           if [ "$rc" -ne 124 ] && [ "$rc" -ne 0 ]; then
-            echo "::error::sensor_station termino con codigo inesperado: $rc"
+            echo "::error::sensor_station exited with an unexpected code: $rc"
             exit 1
           fi
           if grep -qE "ERROR: |runtime error|SUMMARY: " out.log; then
-            echo "::error::informes de ASan/UBSan en la salida"
+            echo "::error::ASan/UBSan reports in the output"
             exit 1
           fi
-          if ! grep -q "temperatura" out.log; then
-            echo "::error::'temperatura' no aparece en la salida"
+          if ! grep -q "temperature" out.log; then
+            echo "::error::'temperature' does not appear in the output"
             exit 1
           fi
           echo "ASan smoke test OK"
 
-      # Suite de integracion TAP (bash, sin dependencias). Secuencial: el
-      # puerto HTTP 8080 es fijo en C, nunca se ejecuta en paralelo.
+      # TAP integration suite (bash, no dependencies). Sequential: the
+      # HTTP port 8080 is fixed in C, it never runs in parallel.
       - name: Integration tests
         env:
           SENSOR_STATION_SEED: "42"

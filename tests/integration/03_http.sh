@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 03_http.sh — servidor HTTP en 127.0.0.1:8080: /metrics (JSON + schema) y
-# pagina HTML por defecto. ~6 s. El puerto es fijo: nunca corre en paralelo.
+# 03_http.sh — HTTP server on 127.0.0.1:8080: /metrics (JSON + schema)
+# and the default HTML page. ~6 s. The port is fixed: never in parallel.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# Valida el schema de /metrics. rc=0 ok, rc=2 (reintentable: aun sin lecturas),
-# rc=1 error de schema.
+# Validates the /metrics schema. rc=0 ok, rc=2 (retryable: no readings
+# yet), rc=1 schema error.
 schema_check() {
     python3 - "$1" <<'PY'
 import json
@@ -14,67 +14,67 @@ try:
     with open(sys.argv[1], "rb") as fh:
         data = fh.read()
     doc = json.loads(data)
-except Exception as exc:  # noqa: BLE001 - se reintenta: cuerpo posible truncado
-    print("JSON ilegible: %s" % exc)
+except Exception as exc:  # noqa: BLE001 - retried: body may be truncated
+    print("unreadable JSON: %s" % exc)
     sys.exit(2)
 
 expected = {
-    "uptime_s", "estado", "alarmas", "lecturas", "perdidas", "picos",
-    "log_perdidas", "cola", "heap_libre", "watchdog", "watchdog_fallos",
-    "cpu_ocupado_pct", "cpu_pct", "temp", "hum", "ultimo_evento",
+    "uptime_s", "state", "alarms", "readings", "dropped", "spikes",
+    "log_dropped", "queue", "heap_free", "watchdog", "watchdog_fails",
+    "cpu_busy_pct", "cpu_pct", "temp", "hum", "last_event",
 }
 keys = set(doc)
 if keys != expected:
-    print("claves distintas: faltan=%s sobran=%s"
+    print("different keys: missing=%s extra=%s"
           % (sorted(expected - keys), sorted(keys - expected)))
     sys.exit(1)
 
 cpu_keys = set(doc["cpu_pct"])
 if cpu_keys != {"temp", "hum", "monitor", "alarm"}:
-    print("cpu_pct claves invalidas: %s" % sorted(cpu_keys))
+    print("invalid cpu_pct keys: %s" % sorted(cpu_keys))
     sys.exit(1)
 
-if doc["estado"] not in ("normal", "pausa", "alarma"):
-    print("estado invalido: %r" % (doc["estado"],))
+if doc["state"] not in ("normal", "paused", "alarm"):
+    print("invalid state: %r" % (doc["state"],))
     sys.exit(1)
-if doc["watchdog"] not in ("ok", "alerta"):
-    print("watchdog invalido: %r" % (doc["watchdog"],))
+if doc["watchdog"] not in ("ok", "alert"):
+    print("invalid watchdog: %r" % (doc["watchdog"],))
     sys.exit(1)
 
-for key in ("uptime_s", "alarmas", "lecturas", "perdidas", "picos",
-            "log_perdidas", "cola", "watchdog_fallos"):
+for key in ("uptime_s", "alarms", "readings", "dropped", "spikes",
+            "log_dropped", "queue", "watchdog_fails"):
     val = doc[key]
     if isinstance(val, bool) or not isinstance(val, int) or val < 0:
-        print("%s invalido: %r" % (key, val))
+        print("invalid %s: %r" % (key, val))
         sys.exit(1)
 
-if isinstance(doc["heap_libre"], bool) or not isinstance(doc["heap_libre"], int) \
-        or doc["heap_libre"] <= 0:
-    print("heap_libre invalido: %r" % (doc["heap_libre"],))
+if isinstance(doc["heap_free"], bool) or not isinstance(doc["heap_free"], int) \
+        or doc["heap_free"] <= 0:
+    print("invalid heap_free: %r" % (doc["heap_free"],))
     sys.exit(1)
 
 def numeric(val, key, strictly_positive=False):
     if isinstance(val, bool) or not isinstance(val, (int, float)):
-        print("%s no numerico: %r" % (key, val))
+        print("%s not numeric: %r" % (key, val))
         sys.exit(1)
     if strictly_positive and not val > 0:
-        print("%s no positivo: %r" % (key, val))
+        print("%s not positive: %r" % (key, val))
         sys.exit(1)
     if val < 0:
-        print("%s negativo: %r" % (key, val))
+        print("%s negative: %r" % (key, val))
         sys.exit(1)
 
-numeric(doc["cpu_ocupado_pct"], "cpu_ocupado_pct")
+numeric(doc["cpu_busy_pct"], "cpu_busy_pct")
 for key, val in doc["cpu_pct"].items():
     numeric(val, "cpu_pct." + key)
 numeric(doc["temp"], "temp")
 numeric(doc["hum"], "hum")
 
-if doc["lecturas"] < 1:
+if doc["readings"] < 1:
     sys.exit(2)
 
-if not isinstance(doc["ultimo_evento"], str) or not doc["ultimo_evento"].strip():
-    print("ultimo_evento vacio: %r" % (doc["ultimo_evento"],))
+if not isinstance(doc["last_event"], str) or not doc["last_event"].strip():
+    print("empty last_event: %r" % (doc["last_event"],))
     sys.exit(1)
 PY
 }
@@ -84,26 +84,26 @@ begin 5
 new_case
 start_bin
 
-# 1) el servidor HTTP responde (<=8 s)
+# 1) the HTTP server answers (<=8 s)
 if wait_http 'http://127.0.0.1:8080/metrics' 8; then
-    ok "GET /metrics responde (<=8 s)"
+    ok "GET /metrics answers (<=8 s)"
 else
-    fail "GET /metrics responde (<=8 s)" "$(tail -n 20 out.log 2>/dev/null)"
+    fail "GET /metrics answers (<=8 s)" "$(tail -n 20 out.log 2>/dev/null)"
 fi
 
-# 2) 200 + Content-Type JSON
+# 2) 200 + JSON Content-Type
 curl -s -D headers.txt -o metrics.json --max-time 3 \
     'http://127.0.0.1:8080/metrics' || true
 code="$(head -n 1 headers.txt 2>/dev/null | awk '{print $2}')"
 if [ "$code" = "200" ] &&
     LC_ALL=C grep -qi '^Content-Type:.*json' headers.txt 2>/dev/null; then
-    ok "GET /metrics -> 200 con Content-Type json"
+    ok "GET /metrics -> 200 with JSON Content-Type"
 else
-    fail "GET /metrics -> 200 con Content-Type json" \
+    fail "GET /metrics -> 200 with JSON Content-Type" \
         "code=$code" "$(head -n 5 headers.txt 2>/dev/null)"
 fi
 
-# 3) schema JSON estricto (con reintentos hasta que haya >=1 lectura)
+# 3) strict JSON schema (retried until there is >=1 reading)
 err=""
 schema_ok=0
 deadline=$(($(date +%s) + 5))
@@ -120,35 +120,35 @@ while :; do
     sleep 0.3
 done
 if [ "$schema_ok" -eq 1 ]; then
-    ok "schema JSON de /metrics estricto y coherente"
+    ok "strict and coherent JSON schema for /metrics"
 else
-    fail "schema JSON de /metrics estricto y coherente" "$err"
+    fail "strict and coherent JSON schema for /metrics" "$err"
 fi
 
-# 4) pagina HTML por defecto
+# 4) default HTML page
 code="$(curl -s -o index.html -w '%{http_code}' --max-time 3 \
     'http://127.0.0.1:8080/' || echo 000)"
 if [ "$code" = "200" ] &&
-    LC_ALL=C grep -qF '<h1>Estacion de sensores FreeRTOS</h1>' index.html &&
+    LC_ALL=C grep -qF '<h1>Sensor station FreeRTOS</h1>' index.html &&
     LC_ALL=C grep -qF '<a href="/metrics">' index.html; then
-    ok "GET / -> 200 HTML con enlace a /metrics"
+    ok "GET / -> 200 HTML with a link to /metrics"
 else
-    fail "GET / -> 200 HTML con enlace a /metrics" \
+    fail "GET / -> 200 HTML with a link to /metrics" \
         "code=$code" "$(head -n 5 index.html 2>/dev/null)"
 fi
 
 # 5) q -> rc=0
 send_key 'q'
 sal=0
-wait_for 'saliendo' out.log 5 && sal=1
+wait_for 'exiting' out.log 5 && sal=1
 gone=0
 wait_gone "$PID" 5 && gone=1
 stop_bin
 rc=$?
 if [ "$sal" -eq 1 ] && [ "$gone" -eq 1 ] && [ "$rc" -eq 0 ]; then
-    ok "tecla q sale con rc=0"
+    ok "key q exits with rc=0"
 else
-    fail "tecla q sale con rc=0" "rc=$rc saliendo=$sal terminado=$gone"
+    fail "key q exits with rc=0" "rc=$rc exiting=$sal finished=$gone"
 fi
 
 finish

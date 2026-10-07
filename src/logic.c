@@ -34,7 +34,7 @@ void vFormatSpark( char * pcBuffer,
 
     if( ( uiCount == 0U ) || ( xBufferSize < 2U ) )
     {
-        ( void ) snprintf( pcBuffer, xBufferSize, "(sin datos)" );
+        ( void ) snprintf( pcBuffer, xBufferSize, "(no data)" );
         return;
     }
 

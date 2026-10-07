@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# lib.sh — helpers TAP13 y gestion del proceso sensor_station.
-# Sin dependencias externas: bash + grep/ps/curl/awk/python3 (todos en ubuntu-latest).
+# lib.sh — TAP13 helpers and sensor_station process management.
+# No external dependencies: bash + grep/ps/curl/awk/python3 (all on ubuntu-latest).
 #
-# Convenciones:
-#   begin N      -> imprime el plan TAP (declarado al principio de cada test)
-#   ok / fail    -> aserciones; fail acepta lineas de diagnostico extra
-#   finish       -> resumen; exit 1 si hubo fallos y conserva el WORKDIR
-#   github_error -> imprime ::error:: (anotacion de GitHub Actions)
+# Conventions:
+#   begin N      -> prints the TAP plan (declared at the top of each test)
+#   ok / fail    -> assertions; fail accepts extra diagnostic lines
+#   finish       -> summary; exit 1 if there were failures and keeps the WORKDIR
+#   github_error -> prints ::error:: (GitHub Actions annotation)
 
 IT_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -51,7 +51,7 @@ finish() {
     printf '# tests %d pass %d fail %d\n' \
         "$_TAP_TOTAL" "$((_TAP_TOTAL - _TAP_FAIL))" "$_TAP_FAIL"
     if [ "$_TAP_FAIL" -gt 0 ]; then
-        # run_all.sh localiza el WORKDIR por esta marca para subirlo como artefacto.
+        # run_all.sh locates the WORKDIR by this mark to upload it as an artifact.
         [ -n "$WORKDIR" ] && printf '# workdir: %s\n' "$WORKDIR"
         return 1
     fi
@@ -62,17 +62,17 @@ finish() {
     return 0
 }
 
-# PIDs de los procesos que ejecutan el binario. El comm NO sirve: el puerto
-# POSIX de FreeRTOS renombra el thread principal a 'Scheduler', asi que la
-# identificacion es por argv. Se excluyen los procesos de la propia suite
-# (sus argv contienen 'tests/integration': run_all.sh, el test y el timeout
-# contenedor, todos con la ruta del binario como argumento).
+# PIDs of the processes running the binary. The comm does NOT work: the
+# FreeRTOS POSIX port renames the main thread to 'Scheduler', so the
+# identification is by argv. The suite's own processes are excluded
+# (their argv contains 'tests/integration': run_all.sh, the test itself
+# and the wrapping timeout, all with the binary path as argument).
 it_live_binaries() {
     local pid args
     for pid in $(pgrep -f -- "$BIN" 2>/dev/null); do
         [ "$pid" = "$$" ] && continue
-        # El PID puede desaparecer entre pgrep y la lectura: args vacio
-        # significa "ya no existe" y NUNCA se cuenta como vivo.
+        # The PID may vanish between pgrep and the read: empty args means
+        # "it no longer exists" and is NEVER counted as alive.
         args="$({ tr '\0' ' ' < "/proc/$pid/cmdline"; } 2>/dev/null)"
         [ -n "$args" ] || continue
         case "$args" in
@@ -82,35 +82,36 @@ it_live_binaries() {
     done
 }
 
-# Resuelve la ruta absoluta del binario ANTES de hacer cd al WORKDIR.
+# Resolves the absolute path of the binary BEFORE cd'ing to the WORKDIR.
 resolve_bin() {
     local b="${1:-${BIN:-./build/sensor_station}}"
     b="$(readlink -f -- "$b" 2>/dev/null || true)"
     if [ -z "$b" ] || [ ! -x "$b" ]; then
-        github_error "binario sensor_station no encontrado o no ejecutable: ${1:-${BIN:-}}"
+        github_error "sensor_station binary not found or not executable: ${1:-${BIN:-}}"
         exit 1
     fi
     BIN="$b"
 }
 
-# Crea un directorio de trabajo aislado (CSVs/tasks.txt no se mezclan entre tests).
-# Si el test falla el directorio NO se borra (artefacto de debug).
+# Creates an isolated working directory (CSVs/tasks.txt do not mix
+# between tests). If the test fails the directory is NOT removed
+# (debug artifact).
 new_case() {
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/it-sensor-XXXXXX")" || {
-        github_error "no se pudo crear el WORKDIR"
+        github_error "could not create the WORKDIR"
         exit 1
     }
     printf '# workdir: %s\n' "$WORKDIR"
     cd -- "$WORKDIR" || {
-        github_error "cd a $WORKDIR fallo"
+        github_error "cd to $WORKDIR failed"
         exit 1
     }
     IT_PRE_PIDS="$(it_live_binaries | tr '\n' ' ')"
     mkfifo in.fifo || {
-        github_error "mkfifo fallo"
+        github_error "mkfifo failed"
         exit 1
     }
-    # O_RDWR sobre FIFO nunca bloquea: evita la carrera lector/escritor.
+    # O_RDWR on a FIFO never blocks: avoids the reader/writer race.
     exec 3<>in.fifo
     FD3_OPEN=1
     trap '_it_cleanup' EXIT
@@ -119,13 +120,14 @@ new_case() {
     trap 'exit 129' HUP
 }
 
-# Lanza el binario en sesion propia (setsid) con FIFO de entrada y timeout de
-# seguridad. $! es el PID de timeout (setsid no hace fork: el hijo del script
-# no es lider de grupo), y su PGID es el mismo PID.
+# Launches the binary in its own session (setsid) with a FIFO as input
+# and a safety timeout. $! is the PID of timeout (setsid does not fork:
+# the script's child is not the group leader), and its PGID is that same
+# PID.
 start_bin() {
     if [ ! -p in.fifo ]; then
         mkfifo in.fifo || {
-            github_error "mkfifo fallo"
+            github_error "mkfifo failed"
             exit 1
         }
     fi
@@ -145,7 +147,7 @@ start_bin() {
         i=$((i + 1))
     done
     if [ -z "$pg" ]; then
-        github_error "no se pudo obtener el PGID del proceso (pid $PID)"
+        github_error "could not get the PGID of the process (pid $PID)"
         PID=""
         exit 1
     fi
@@ -154,7 +156,7 @@ start_bin() {
 
 send_key() { printf '%s' "$1" >&3; }
 
-# wait_for <regex> <fichero> <deadline_s> — poll cada 0,15 s.
+# wait_for <regex> <file> <deadline_s> — polls every 0.15 s.
 wait_for() {
     local re="$1" file="$2" deadline="${3:-5}"
     local steps i
@@ -170,7 +172,7 @@ wait_for() {
     return 1
 }
 
-# wait_for_str <cadena literal> <fichero> <deadline_s> — para secuencias ANSI.
+# wait_for_str <literal string> <file> <deadline_s> — for ANSI sequences.
 wait_for_str() {
     local s="$1" file="$2" deadline="${3:-5}"
     local steps i
@@ -186,7 +188,7 @@ wait_for_str() {
     return 1
 }
 
-# wait_count <regex> <fichero> <min_lineas> <deadline_s>
+# wait_count <regex> <file> <min_lines> <deadline_s>
 wait_count() {
     local re="$1" file="$2" min="$3" deadline="${4:-5}"
     local steps i n
@@ -203,8 +205,8 @@ wait_count() {
     return 1
 }
 
-# wait_gone <pid> <deadline_s> — un zombie cuenta como terminado (kill -0
-# devuelve 0 tambien con zombies, por eso se consulta el estado en ps).
+# wait_gone <pid> <deadline_s> — a zombie counts as finished (kill -0
+# also returns 0 for zombies, that is why the state is checked in ps).
 wait_gone() {
     local pid="$1" deadline="${2:-5}"
     local steps i state
@@ -240,7 +242,7 @@ wait_http() {
     return 1
 }
 
-# Cierra fd3, termina el grupo y devuelve el rc del binario.
+# Closes fd3, terminates the group and returns the rc of the binary.
 stop_bin() {
     local rc=0
     [ -n "${PID:-}" ] || return 0
@@ -264,7 +266,7 @@ check_sanitizers() {
     LC_ALL=C grep -qE "ERROR: |runtime error|SUMMARY: " -- "$1" 2>/dev/null
 }
 
-# Limpieza garantizada: NUNCA se dejan huerfanos entre tests.
+# Guaranteed cleanup: orphans are NEVER left between tests.
 _it_cleanup() {
     local st=$?
     local p
@@ -281,8 +283,9 @@ _it_cleanup() {
         fi
         wait "$PID" 2>/dev/null || true
     fi
-    # Binarios que se hayan escapado del grupo (p. ej. `script` crea sesion
-    # propia para su hijo): se matan solo los que no existian antes del test.
+    # Binaries that escaped the group (e.g. `script` creates its own
+    # session for its child): only the ones that did not exist before the
+    # test are killed.
     for p in $(it_live_binaries); do
         case " ${IT_PRE_PIDS:-} " in
             *" $p "*) ;;

@@ -1,275 +1,275 @@
-# Estación de sensores con FreeRTOS
+# Sensor station with FreeRTOS
 
 [![CI](https://github.com/Ghostalex07/freertos-sensor-station/actions/workflows/ci.yml/badge.svg)](https://github.com/Ghostalex07/freertos-sensor-station/actions/workflows/ci.yml)
 
-Demo educativa de **FreeRTOS** que simula una estación de sensores de temperatura y humedad, corriendo en **Linux** sobre el puerto `GCC_POSIX` (las tareas FreeRTOS se ejecutan como hilos `pthread`, sin necesidad de placa ni emulador).
+Educational **FreeRTOS** demo that simulates a temperature and humidity sensor station, running on **Linux** over the `GCC_POSIX` port (FreeRTOS tasks run as `pthread` threads, no board or emulator needed).
 
-![Demo con dashboard, alarma y sparklines](docs/demo.gif)
+![Demo with dashboard, alarm and sparklines](docs/demo.gif)
 
-## Características destacadas
+## Highlights
 
-- 🐧 **Sin hardware**: usa el puerto `GCC_POSIX` de FreeRTOS, así que puedes probar multitarea real en tu propio PC.
-- 📡 **Pipeline clásico de RTOS**: sensores → cola → monitor → semáforo → tarea de alarma → event group.
-- ⏱️ **Periodicidad garantizada** con `vTaskDelayUntil` (no se acumula deriva).
-- ⌨️ **Interfaz interactiva** por stdin en modo terminal raw: inyectar picos, pausar sensores, reiniciar contadores.
-- 🖥️ **Dashboard interactivo** en terminal (tecla `d`): barras de temperatura/humedad/cola/heap, **CPU % por tarea** (`uxTaskGetSystemState` + run-time stats a 1 µs) y **sparklines** con las últimas 32 lecturas.
-- 📊 **Telemetría propia**: heap libre, nº de tareas, mínimo de pila y ocupación de CPU cada 5 s.
-- 📝 **Logging CSV**: la tarea `logger` escribe `readings.csv` (cada lectura) y `events.csv` (alarmas, watchdog, eventos) a través de un **stream buffer** y un **message buffer**.
-- 🐕 **Watchdog por software**: vigila el latido de las 7 tareas; si una supera su timeout lo reporta como evento (pásala con `w` para verlo en acción).
-- 🌐 **Endpoint HTTP**: servidor JSON mínimo en `127.0.0.1:8080/metrics` con estado, CPU %, heap, watchdog y última lectura (`curl` para verlo).
-- 🛑 **Salida limpia con señales**: `SIGINT`, `SIGTERM` y `SIGHUP` terminan la demo ordenadamente (también con stdin cerrado).
-- 🔀 **Stream/message buffers**: binario para lecturas (stream) y texto para eventos (message buffer), ambos primitivas reales de FreeRTOS.
-- 🧰 **Primitivas avanzadas con demo interactiva**: cola de colas (*queue set*) + `xQueueOverwrite`/`xQueuePeek`, sincronización temp+hum con event group, inversión de prioridades semáforo vs mutex (tecla `i`), `vTaskPrioritySet` (tecla `v`), backpressure con consumidor lento (tecla `k`) y volcado `vTaskList` (tecla `s`).
-- 🖼️ **Página HTML** en `http://127.0.0.1:8080/` (además del JSON `/metrics`, ahora con **CPU % por tarea**).
-- 📜 **Rotación de CSV**: `readings.csv` rota a `readings.1.csv` al superar 64 KiB.
-- 🧪 **Tests unitarios**: funciones puras en `src/logic.c` con `ctest` (`tests/test_logic.c`).
-- ⚙️ **Alojamiento estático**: la tarea `logger` usa `xTaskCreateStatic` con TCB y pila propios (sin `pvPortMalloc`).
-- 🎲 **Semilla reproducible**: `SENSOR_STATION_SEED=42 ./build/sensor_station` genera lecturas deterministas (útil en CI).
-- 🔧 **Configuración centralizada** en `FreeRTOSConfig.h` y en la cabecera de `src/main.c`.
-- 🏗️ **Build con CMake**: descarga el kernel con `FetchContent` o usa uno local con `-DFREERTOS_KERNEL_PATH`.
+- 🐧 **No hardware**: it uses the FreeRTOS `GCC_POSIX` port, so you can try real multitasking on your own PC.
+- 📡 **Classic RTOS pipeline**: sensors → queue → monitor → semaphore → alarm task → event group.
+- ⏱️ **Guaranteed periodicity** with `vTaskDelayUntil` (no drift accumulates).
+- ⌨️ **Interactive interface** over stdin in raw terminal mode: inject spikes, pause sensors, reset counters.
+- 🖥️ **Interactive dashboard** in the terminal (key `d`): temperature/humidity/queue/heap bars, **CPU % per task** (`uxTaskGetSystemState` + run-time stats at 1 µs) and **sparklines** with the last 32 readings.
+- 📊 **Own telemetry**: free heap, task count, minimum stack and CPU usage every 5 s.
+- 📝 **CSV logging**: the `logger` task writes `readings.csv` (every reading) and `events.csv` (alarms, watchdog, events) through a **stream buffer** and a **message buffer**.
+- 🐕 **Software watchdog**: it watches the heartbeat of the 7 tasks; if one exceeds its timeout it reports it as an event (stall it with `w` to see it in action).
+- 🌐 **HTTP endpoint**: minimal JSON server on `127.0.0.1:8080/metrics` with state, CPU %, heap, watchdog and latest reading (`curl` to see it).
+- 🛑 **Clean shutdown with signals**: `SIGINT`, `SIGTERM` and `SIGHUP` end the demo gracefully (also with stdin closed).
+- 🔀 **Stream/message buffers**: binary for readings (stream) and text for events (message buffer), both real FreeRTOS primitives.
+- 🧰 **Advanced primitives with an interactive demo**: queue of queues (*queue set*) + `xQueueOverwrite`/`xQueuePeek`, temp+hum synchronization with an event group, priority inversion semaphore vs mutex (key `i`), `vTaskPrioritySet` (key `v`), backpressure with a slow consumer (key `k`) and a `vTaskList` dump (key `s`).
+- 🖼️ **HTML page** at `http://127.0.0.1:8080/` (besides the JSON `/metrics`, now with **CPU % per task**).
+- 📜 **CSV rotation**: `readings.csv` rotates to `readings.1.csv` past 64 KiB.
+- 🧪 **Unit tests**: pure functions in `src/logic.c` tested with `ctest` (`tests/test_logic.c`).
+- ⚙️ **Static allocation**: the `logger` task uses `xTaskCreateStatic` with its own TCB and stack (no `pvPortMalloc`).
+- 🎲 **Reproducible seed**: `SENSOR_STATION_SEED=42 ./build/sensor_station` produces deterministic readings (useful in CI).
+- 🔧 **Centralized configuration** in `FreeRTOSConfig.h` and in the header of `src/main.c`.
+- 🏗️ **CMake build**: downloads the kernel with `FetchContent` or uses a local one with `-DFREERTOS_KERNEL_PATH`.
 
 ---
 
-## Requisitos
+## Requirements
 
-| Requisito | Versión mínima |
+| Requirement | Minimum version |
 | --- | --- |
-| Sistema operativo | Linux |
-| Compilador | `gcc` |
+| Operating system | Linux |
+| Compiler | `gcc` |
 | CMake | 3.15 |
 
 > [!NOTE]
-> En la **primera configuración**, CMake descarga el kernel FreeRTOS desde GitHub con `FetchContent` (FreeRTOS-Kernel **V11.3.1**), así que necesitas conexión a red. Si trabajas **sin red**, clona el kernel por tu cuenta y pásale su ruta con `-DFREERTOS_KERNEL_PATH=/ruta/al/FreeRTOS-Kernel`.
+> On the **first configuration**, CMake downloads the FreeRTOS kernel from GitHub with `FetchContent` (FreeRTOS-Kernel **V11.3.1**), so you need network access. If you work **offline**, clone the kernel yourself and pass its path with `-DFREERTOS_KERNEL_PATH=/path/to/FreeRTOS-Kernel`.
 
 ---
 
-## Compilar y ejecutar
+## Build and run
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
-ctest --test-dir build --output-on-failure   # tests unitarios (opcional)
+ctest --test-dir build --output-on-failure   # unit tests (optional)
 ./build/sensor_station
 ```
 
-### Variante sin conexión (kernel local)
+### Offline variant (local kernel)
 
 ```bash
-cmake -S . -B build -DFREERTOS_KERNEL_PATH=/ruta/al/FreeRTOS-Kernel
+cmake -S . -B build -DFREERTOS_KERNEL_PATH=/path/to/FreeRTOS-Kernel
 cmake --build build -j
 ./build/sensor_station
 ```
 
-El ejecutable se genera como `sensor_station` dentro de `build/`.
+The executable is produced as `sensor_station` inside `build/`.
 
 ---
 
-## Controles
+## Controls
 
-Pulsa las teclas mientras la aplicación está en ejecución. Si stdout es una **terminal**, la demo arranca en modo *dashboard* (pantalla completa con barras); con stdout redirigido a fichero/pipe usa modo línea. La tecla `d` alterna entre ambos.
+Press the keys while the application is running. If stdout is a **terminal**, the demo starts in *dashboard* mode (full screen with bars); with stdout redirected to a file/pipe it uses line mode. The `d` key toggles between the two.
 
-| Tecla | Acción |
+| Key | Action |
 | :---: | --- |
-| `t` | Inyecta una lectura de temperatura fuera de umbral (dispara alarma) |
-| `h` | Inyecta una lectura de humedad fuera de umbral (dispara alarma) |
-| `p` | Pausa los sensores (bandera `xSensorsPaused`, sin `vTaskSuspend`) |
-| `c` | Reanuda los sensores |
-| `r` | Reinicia el contador de alarmas |
-| `d` | Alterna entre modo dashboard y modo línea (solo con terminal) |
-| `w` | Telemetría de watchdog: detiene los latidos de `monitor` (sin suspenderla, para no retener mutex) y ver la detección de «sin latido» y la recuperación |
-| `i` | **Inversión de prioridades**: tarea BAJA toma el recurso (semáforo binario 1ª fase, mutex con herencia 2ª fase); la ALTA espera y se imprime su tiempo de bloqueo |
-| `v` | **`vTaskPrioritySet`**: baja `monitor` de prioridad 3 a 1 durante 5 s y la restaura |
-| `k` | **Backpressure**: activa/desactiva un consumidor lento (2 s por lectura) y observa cómo sube `perdidas` |
-| `s` | **`vTaskList`**: vuelca el estado de todas las tareas a `tasks.txt` (y lo imprime en modo línea) |
-| `q` | Sale limpia de la aplicación |
-| `?` | Muestra la ayuda |
+| `t` | Injects an out-of-threshold temperature reading (triggers an alarm) |
+| `h` | Injects an out-of-threshold humidity reading (triggers an alarm) |
+| `p` | Pauses the sensors (`xSensorsPaused` flag, no `vTaskSuspend`) |
+| `c` | Resumes the sensors |
+| `r` | Resets the alarm counter |
+| `d` | Toggles between dashboard mode and line mode (terminal only) |
+| `w` | Watchdog telemetry: stops the `monitor` heartbeats (without suspending it, so it holds no mutex) and shows the "failed to beat" detection and the recovery |
+| `i` | **Priority inversion**: the LOW task takes the resource (binary semaphore in the 1st phase, mutex with inheritance in the 2nd phase); the HIGH task waits and its blocking time is printed |
+| `v` | **`vTaskPrioritySet`**: drops `monitor` from priority 3 to 1 for 5 s and restores it |
+| `k` | **Backpressure**: enables/disables a slow consumer (2 s per reading) and watch `dropped` rise |
+| `s` | **`vTaskList`**: dumps the state of every task to `tasks.txt` (and prints it in line mode) |
+| `q` | Exits the application cleanly |
+| `?` | Shows the help |
 
 ---
 
-## Arquitectura
+## Architecture
 
-### Flujo de datos
+### Data flow
 
 ```
  ┌────────────────┐   ┌────────────────┐
- │  tarea temp    │   │  tarea hum     │      prioridad 2
+ │  task temp     │   │  task hum      │      priority 2
  │  (700 ms)      │   │  (1100 ms)     │      vTaskDelayUntil
  └───────┬────────┘   └───────┬────────┘
          │  xQueueSend        │  xQueueSend
          └──────────┬─────────┘
                     ▼
         ┌───────────────────────┐
-        │   cola (8 elementos)  │
+        │   queue (8 entries)   │
         └───────────┬───────────┘
-                    │  xQueueReceive (bloqueante)
+                    │  xQueueReceive (blocking)
                     ▼
         ┌───────────────────────┐
-        │   tarea monitor       │  prioridad 3
-        │  imprime lecturas     │
-        │  detecta alarmas      │
+        │   task monitor        │  priority 3
+        │  prints readings      │
+        │  detects alarms       │
         └───────────┬───────────┘
-                    │  xSemaphoreGive  (¿alarma?)
+                    │  xSemaphoreGive  (alarm?)
                     ▼
         ┌───────────────────────┐
-        │   tarea alarm         │  prioridad 4 (máxima)
+        │   task alarm          │  priority 4 (highest)
         │  xSemaphoreTake       │
-        │  contador + mutex     │
-        │  imprime alarma       │
+        │  counter + mutex      │
+        │  prints the alarm     │
         └───────────┬───────────┘
                     │  xEventGroupSetBits
                     ▼
         ┌───────────────────────┐
-        │     event group       │   bit de alarma activa
-        │  (se limpia a los 3 s)│
+        │     event group       │   active alarm bit
+        │  (cleared after 3 s)  │
         └───────────────────────┘
 
-  ── Independientes ──────────────────────────────────────────
+  ── Independent ────────────────────────────────────────────
   ┌────────────────┐        ┌──────────────────────────────┐
-  │  tarea stats   │        │  timer de software (10 s)    │
-  │  prioridad 1   │        │  xTimerCreate                │
-  │  cada 5 s      │        │  inyecta picos de temperatura│
-  │  (o 500 ms     │        └──────────────────────────────┘
-  │   dashboard)   │        CPU% por tarea: uxTaskGetSystemState
+  │  task stats    │        │  software timer (10 s)       │
+  │  priority 1    │        │  xTimerCreate                │
+  │  every 5 s     │        │  injects temperature spikes  │
+  │  (or 500 ms    │        └──────────────────────────────┘
+  │   dashboard)   │        CPU% per task: uxTaskGetSystemState
   └────────────────┘
   ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
   │  logger (CSV)  │  │  watchdog      │  │  http (8080)   │
-  │  stream+msgbuf │  │  latido x7     │  │  JSON metrics  │
+  │  stream+msgbuf │  │  beat x7       │  │  JSON metrics  │
   └────────────────┘  └────────────────┘  └────────────────┘
 ```
 
-### Primitivas de FreeRTOS utilizadas
+### FreeRTOS primitives used
 
-| Primitiva | APIs | Papel en la demo |
+| Primitive | APIs | Role in the demo |
 | --- | --- | --- |
-| **Cola** | `xQueueCreate`, `xQueueSend`, `xQueueReceive` | Canaliza las lecturas de los sensores hacia el monitor (8 posiciones). |
-| **Mutex** | `xSemaphoreCreateMutex`, `xSemaphoreTake`, `xSemaphoreGive` | Uno protege la salida compartida de `printf`, otro el contador de alarmas. |
-| **Semáforo binario** | `xSemaphoreCreateBinary`, `xSemaphoreTake`, `xSemaphoreGive` | El monitor avisa a la tarea de alarma cuando detecta un umbral superado. |
-| **Event group** | `xEventGroupCreate`, `xEventGroupSetBits`, `xEventGroupClearBits` | Marca que hay una alarma activa y la limpia pasados 3 s. |
-| **Semáforo contador** | `xSemaphoreCreateCounting` | Cuenta las lecturas descartadas cuando la cola está llena; `stats` las consume. |
-| **Notificación de tareas** | `xTaskNotifyGive`, `xTaskNotifyWait` | Despierta al instante a la tarea `stats` para redibujar el dashboard. |
-| **Timer de software** | `xTimerCreate` | Cada 10 s inyecta un pico de temperatura que provoca alarma. |
-| **Gestión de tareas** | `xTaskCreate`, `xTaskCreateStatic`, bandera `xSensorsPaused` | Crea las 15 tareas (una de ellas con alojamiento estático); `p`/`c` pausan los sensores con una bandera (sin bloquear tareas). |
-| **Periodicidad** | `vTaskDelayUntil` | Los sensores se ejecutan cada 700 ms / 1100 ms sin deriva. |
-| **Diagnóstico** | `xPortGetFreeHeapSize`, `uxTaskGetStackHighWaterMark`, `uxTaskGetSystemState` | La tarea `stats` reporta heap, pila mínima y CPU % por tarea (*run-time stats*). |
-| **Stream buffer** | `xStreamBufferCreate`, `xStreamBufferSend`, `xStreamBufferReceive` | Binario de lecturas sensor→logger; el monitor envía cada muestra y `logger` vuelca `readings.csv`. |
-| **Message buffer** | `xMessageBufferCreate`, `xMessageBufferSend`, `xMessageBufferReceive` | Texto de eventos (alarmas, watchdog, http…) hacia `events.csv`. |
-| **Cola de colas** | `xQueueCreateSet`, `xQueueAddToSet`, `xQueueSelectFromSet` | El conjunto recoge las colas «último valor» de temp y hum; `aggreg` espera con la cola de colas y resuelve con `xQueuePeek`. |
-| **`xQueueOverwrite`** | `xQueueOverwrite` | Colas de longitud 1 con el valor más reciente de cada sensor (patrón «latest value», sin perder muestras). |
-| **`xQueuePeek`** | `xQueuePeek` | `aggreg` lee el último valor **sin consumirlo**, para poder calcular la media de ambas series. |
-| **Sincronización (event group)** | `xEventGroupWaitBits` (espera de todos los bits) | `sync` solo imprime cuando llegan temp **y** hum del mismo ciclo (bits separados, espera con `xWaitForAllBits`). |
-| **Inversión de prioridades** | semáforo binario vs `xSemaphoreCreateMutex` | Demo `i`: la tarea BAJA retiene el recurso mientras la ALTA espera; el mutex aplica herencia y reduce la espera de ~1 s a <10 ms. |
-| **`vTaskPrioritySet`** | `vTaskPrioritySet` | Demo `v`: baja y restaura la prioridad de `monitor` en caliente. |
-| **Backpressure** | consumidor bloqueante + `xSemaphoreGive` (contador) | Demo `k`: con la cola llena, los descartes crecen y se cuentan en `perdidas`. |
-| **Alojamiento estático** | `xTaskCreateStatic` | La tarea `logger` usa TCB y pila estáticos (sin `pvPortMalloc`). |
-| **`vTaskList`** | `vTaskList` (trace facility) | Demo `s`: vuelca nombre/estado/prioridad/pila de todas las tareas a `tasks.txt`. |
-| **Sockets POSIX** | `socket`, `accept`, `send` | La tarea `http` expone `127.0.0.1:8080` (JSON y HTML) fuera del kernel, estilo LWIP. |
+| **Queue** | `xQueueCreate`, `xQueueSend`, `xQueueReceive` | Carries the sensor readings to the monitor (8 slots). |
+| **Mutex** | `xSemaphoreCreateMutex`, `xSemaphoreTake`, `xSemaphoreGive` | One protects the shared `printf` output, the other the alarm counter. |
+| **Binary semaphore** | `xSemaphoreCreateBinary`, `xSemaphoreTake`, `xSemaphoreGive` | The monitor signals the alarm task when it detects a threshold breach. |
+| **Event group** | `xEventGroupCreate`, `xEventGroupSetBits`, `xEventGroupClearBits` | Marks an active alarm and clears it after 3 s. |
+| **Counting semaphore** | `xSemaphoreCreateCounting` | Counts the dropped readings when the queue is full; `stats` consumes them. |
+| **Task notification** | `xTaskNotifyGive`, `xTaskNotifyWait` | Wakes the `stats` task instantly to redraw the dashboard. |
+| **Software timer** | `xTimerCreate` | Every 10 s it injects a temperature spike that triggers an alarm. |
+| **Task management** | `xTaskCreate`, `xTaskCreateStatic`, `xSensorsPaused` flag | Creates the 15 tasks (one of them statically allocated); `p`/`c` pause the sensors with a flag (no task is blocked). |
+| **Periodicity** | `vTaskDelayUntil` | The sensors run every 700 ms / 1100 ms without drift. |
+| **Diagnostics** | `xPortGetFreeHeapSize`, `uxTaskGetStackHighWaterMark`, `uxTaskGetSystemState` | The `stats` task reports heap, minimum stack and CPU % per task (*run-time stats*). |
+| **Stream buffer** | `xStreamBufferCreate`, `xStreamBufferSend`, `xStreamBufferReceive` | Binary sensor→logger readings; the monitor sends every sample and `logger` dumps `readings.csv`. |
+| **Message buffer** | `xMessageBufferCreate`, `xMessageBufferSend`, `xMessageBufferReceive` | Event text (alarms, watchdog, http…) into `events.csv`. |
+| **Queue set** | `xQueueCreateSet`, `xQueueAddToSet`, `xQueueSelectFromSet` | The set collects the "latest value" queues of temp and hum; `aggreg` waits on the queue set and resolves with `xQueuePeek`. |
+| **`xQueueOverwrite`** | `xQueueOverwrite` | Length-1 queues holding the most recent value of each sensor ("latest value" pattern, no sample lost). |
+| **`xQueuePeek`** | `xQueuePeek` | `aggreg` reads the latest value **without consuming it**, so it can average both series. |
+| **Synchronization (event group)** | `xEventGroupWaitBits` (wait for all bits) | `sync` only prints when temp **and** hum arrive from the same cycle (separate bits, wait with `xWaitForAllBits`). |
+| **Priority inversion** | binary semaphore vs `xSemaphoreCreateMutex` | Demo `i`: the LOW task holds the resource while the HIGH task waits; the mutex applies inheritance and cuts the wait from ~1 s to <10 ms. |
+| **`vTaskPrioritySet`** | `vTaskPrioritySet` | Demo `v`: lowers and restores the `monitor` priority on the fly. |
+| **Backpressure** | blocking consumer + `xSemaphoreGive` (counting) | Demo `k`: with the queue full, the drops grow and are counted in `dropped`. |
+| **Static allocation** | `xTaskCreateStatic` | The `logger` task uses a static TCB and stack (no `pvPortMalloc`). |
+| **`vTaskList`** | `vTaskList` (trace facility) | Demo `s`: dumps name/state/priority/stack of every task to `tasks.txt`. |
+| **POSIX sockets** | `socket`, `accept`, `send` | The `http` task exposes `127.0.0.1:8080` (JSON and HTML) outside the kernel, LWIP-style. |
 
 ---
 
-## Observabilidad
+## Observability
 
 ### CSV (`logger`)
 
-| Fichero | Contenido |
+| File | Content |
 | --- | --- |
-| `readings.csv` | `epoch_ms,sensor,valor,secuencia,alarma` — cada lectura que pasa por el monitor. |
-| `events.csv` | `epoch_ms,evento` — alarmas, watchdog, eventos HTTP, arranque y apagado. |
+| `readings.csv` | `epoch_ms,sensor,value,sequence,alarm` — every reading that passes through the monitor. |
+| `events.csv` | `epoch_ms,event` — alarms, watchdog, HTTP events, startup and shutdown. |
 
-Al superar los **64 KiB**, `readings.csv` rota a `readings.1.csv` y se reabre con cabecera. Para graficarlo sin dependencias:
+Past **64 KiB**, `readings.csv` rotates to `readings.1.csv` and reopens with a header. To plot it with no dependencies:
 
 ```bash
-python3 tools/plot_csv.py readings.csv docs/chart.svg   # genera la serie temporal
+python3 tools/plot_csv.py readings.csv docs/chart.svg   # generates the time series
 ```
 
-![Lecturas de temperatura y humedad](docs/chart.svg)
+![Temperature and humidity readings](docs/chart.svg)
 
 ### HTTP (`http`)
 
 ```bash
 curl http://127.0.0.1:8080/metrics
-# {"uptime_s":2,"estado":"normal","alarmas":0,...,"cpu_pct":{"temp":0.4,...},...}
+# {"uptime_s":2,"state":"normal","alarms":0,...,"cpu_pct":{"temp":0.4,...},...}
 
-curl http://127.0.0.1:8080/          # página HTML con auto-refresh cada 2 s
+curl http://127.0.0.1:8080/          # HTML page auto-refreshing every 2 s
 ```
 
-El JSON incluye ahora **`cpu_pct` con el uso de CPU (%) de temp, hum, monitor y alarm**. Se cierra solo al recibir la respuesta (sin `keep-alive`) y usa `MSG_DONTWAIT` para no bloquear el planificador.
+The JSON now includes **`cpu_pct` with the CPU usage (%) of temp, hum, monitor and alarm**. The connection closes itself after the response (no `keep-alive`) and uses `MSG_DONTWAIT` so it never blocks the scheduler.
 
 ### Watchdog
 
-Cada tarea latida con `vWatchdogBeat()`; la tarea `watchdog` compara con timeouts propios (5 s, 8 s para `stats`). Pasa `w` para detener los latidos de `monitor` (bandera interna, nunca `vTaskSuspend`: suspenderla con mutex retenidos colgaría el sistema) y ver el evento `sin latido` + `recupero el latido`.
+Every task beats with `vWatchdogBeat()`; the `watchdog` task compares against its own timeouts (5 s, 8 s for `stats`). Press `w` to stop the `monitor` heartbeats (internal flag, never `vTaskSuspend`: suspending it with mutexes held would hang the system) and see the `failed to beat` event plus `beat resumed`.
 
-### Semilla reproducible
+### Reproducible seed
 
 ```bash
-SENSOR_STATION_SEED=42 ./build/sensor_station   # lecturas idénticas en cada run
+SENSOR_STATION_SEED=42 ./build/sensor_station   # identical readings on every run
 ```
 
 ---
 
-## Configuración
+## Configuration
 
-Todo lo ajustable está en dos sitios:
+Everything tunable lives in two places:
 
-| Qué | Dónde | Detalle |
+| What | Where | Detail |
 | --- | --- | --- |
-| Umbrales de alarma | `src/main.c` | Constantes `TEMP_ALARM_THRESHOLD` y `HUM_ALARM_THRESHOLD` al inicio del archivo. |
-| Periodo de los sensores | `src/main.c` | Tareas `xTempSensor` y `xHumSensor` (700 ms y 1100 ms). |
-| Tamaño del heap | `FreeRTOSConfig.h` | `configTOTAL_HEAP_SIZE = 524288` (512 KiB). |
-| Tamaño de pila mínimo | `FreeRTOSConfig.h` | `configMINIMAL_STACK_SIZE = 2048`. |
-| Frecuencia del tick | `FreeRTOSConfig.h` | 100 Hz (10 ms por tick). |
-| Detección de desbordamiento de pila | `FreeRTOSConfig.h` | `configCHECK_FOR_STACK_OVERFLOW = 2`. ⚠️ En el puerto GCC_POSIX cada tarea corre en un pthread con pila nativa: la marca de pila de FreeRTOS es constante, la protección real la aporta el propio sistema. |
-| CPU % por tarea | `FreeRTOSConfig.h` | `configGENERATE_RUN_TIME_STATS = 1` con contador propio de 1 µs (`portALT_GET_RUN_TIME_COUNTER_VALUE`, ver `ulPortGetAltMicros()` en `src/main.c`). |
+| Alarm thresholds | `src/main.c` | Constants `TEMP_ALARM_THRESHOLD` and `HUM_ALARM_THRESHOLD` at the top of the file. |
+| Sensor period | `src/main.c` | The `xTempSensor` and `xHumSensor` tasks (700 ms and 1100 ms). |
+| Heap size | `FreeRTOSConfig.h` | `configTOTAL_HEAP_SIZE = 524288` (512 KiB). |
+| Minimum stack size | `FreeRTOSConfig.h` | `configMINIMAL_STACK_SIZE = 2048`. |
+| Tick frequency | `FreeRTOSConfig.h` | 100 Hz (10 ms per tick). |
+| Stack overflow detection | `FreeRTOSConfig.h` | `configCHECK_FOR_STACK_OVERFLOW = 2`. ⚠️ On the GCC_POSIX port every task runs in a pthread with a native stack: the FreeRTOS stack mark is constant, the real protection comes from the system itself. |
+| CPU % per task | `FreeRTOSConfig.h` | `configGENERATE_RUN_TIME_STATS = 1` with its own 1 µs counter (`portALT_GET_RUN_TIME_COUNTER_VALUE`, see `ulPortGetAltMicros()` in `src/main.c`). |
 
-> Los periodos de las tareas, la ventana de limpieza del event group (3 s) y el periodo del timer (10 s) también se definen en `src/main.c`.
-
----
-
-## Ejercicios propuestos
-
-Ordenados de fácil a difícil:
-
-1. **Cambiar umbrales.** Modifica `TEMP_ALARM_THRESHOLD` y `HUM_ALARM_THRESHOLD` y comprueba que las alarmas se disparan antes o después. ¿Qué pasa si subes el umbral por encima del valor máximo que puede generar el sensor aleatorio?
-
-2. **Backpressure en la cola.** Cambia el `xQueueSend` de los sensores para que use `portMAX_DELAY` en lugar de un timeout corto, y ralentiza la tarea `monitor` (aumenta su retardo o hazle más trabajo). Observa cómo los productores se bloquean cuando la cola (8 elementos) se llena. *Ya implementado como demo: pulsa `k`.*
-
-3. **Añadir un tercer sensor.** Copia el patrón de `temp`/`hum` para crear un sensor de presión con su propio periodo, añade el campo correspondiente al formato de la cola y amplía el `monitor` para imprimirlo y evaluar su umbral.
-
-4. **Modo silencio.** Haz que la tarea `alarm`, mientras suena (durante esos 3 s), suspenda la tarea `stats` con `vTaskSuspend` y la reanude al limpiar el bit del event group. Comprueba que no se imprimen estadísticas con una alarma activa.
-
-5. **Jugar con las prioridades.** Sube y baja las prioridades de `monitor`, `alarm` y `stats` y observa cómo cambia el orden de salida cuando varias tareas están listas al mismo tiempo. Explica el resultado en términos de planificación preemptiva de FreeRTOS. *Un ejemplo con `vTaskPrioritySet` ya está: pulsa `v`; la inversión de prioridades está en `i`.*
+> The task periods, the event group clearing window (3 s) and the timer period (10 s) are also defined in `src/main.c`.
 
 ---
 
-## Estructura del repositorio
+## Proposed exercises
+
+Ordered from easy to hard:
+
+1. **Change the thresholds.** Modify `TEMP_ALARM_THRESHOLD` and `HUM_ALARM_THRESHOLD` and check that alarms fire earlier or later. What happens if you raise the threshold above the maximum value the random sensor can produce?
+
+2. **Backpressure on the queue.** Change the sensors' `xQueueSend` to use `portMAX_DELAY` instead of a short timeout, and slow down the `monitor` task (increase its delay or give it more work). Watch how the producers block when the queue (8 entries) fills up. *Already implemented as a demo: press `k`.*
+
+3. **Add a third sensor.** Copy the `temp`/`hum` pattern to create a pressure sensor with its own period, add the corresponding field to the queue format and extend `monitor` to print it and evaluate its threshold.
+
+4. **Silent mode.** Make the `alarm` task, while it rings (for those 3 s), suspend the `stats` task with `vTaskSuspend` and resume it when the event group bit is cleared. Check that no statistics are printed while an alarm is active.
+
+5. **Play with priorities.** Raise and lower the priorities of `monitor`, `alarm` and `stats` and watch how the output order changes when several tasks are ready at the same time. Explain the result in terms of FreeRTOS preemptive scheduling. *An example with `vTaskPrioritySet` is already there: press `v`; the priority inversion is on `i`.*
+
+---
+
+## Repository structure
 
 ```
 freertos-sensor-station/
-├── .github/workflows/ci.yml  # CI: build local + FetchContent + ASan, ctest y smoke test
-├── CMakeLists.txt        # Build: FetchContent del kernel o ruta local + logic_tests
-├── FreeRTOSConfig.h      # Configuración de FreeRTOS (heap, pila, tick, queue sets…)
+├── .github/workflows/ci.yml  # CI: local build + FetchContent + ASan, ctest and smoke test
+├── CMakeLists.txt        # Build: FetchContent of the kernel or local path + logic_tests
+├── FreeRTOSConfig.h      # FreeRTOS configuration (heap, stack, tick, queue sets…)
 ├── LICENSE               # MIT
-├── README.md             # Este archivo
+├── README.md             # This file
 ├── .gitignore
 ├── src/
-│   ├── app_config.h          # Constantes de la app: periodos, umbrales, rutas CSV, prioridades
-│   ├── app_types.h           # Tipos compartidos: sensores, registro CSV, estado global, ids del watchdog
-│   ├── app_shared.h          # Costura entre módulos: globals `extern` y utilidades comunes
-│   ├── logic.c / logic.h     # Funciones puras (sparklines, barras, umbrales) con tests
-│   ├── main.c                # Orquestador: sensores, monitor, alarmas, stats, sync, init y main()
-│   ├── watchdog.c / watchdog.h    # Latidos de cada tarea y revisión periódica (vWatchdogBeat)
-│   ├── logger_csv.c / logger_csv.h # Escritura y rotación de readings.csv y events.csv
-│   ├── http_server.c / http_server.h # Servidor HTTP: dashboard en HTML y métricas en JSON
-│   ├── dashboard.c / dashboard.h  # Pintado ANSI del dashboard (barras, sparklines, CPU por tarea)
-│   └── demos.c / demos.h     # Teclado (vCommandTask) y demos: inversión, prioridades, vigía, presión
-├── tests/test_logic.c    # Tests unitarios (ctest)
-├── tools/plot_csv.py     # Gráfica SVG de readings.csv sin dependencias
+│   ├── app_config.h          # App constants: periods, thresholds, CSV paths, priorities
+│   ├── app_types.h           # Shared types: sensors, CSV record, global state, watchdog ids
+│   ├── app_shared.h          # Seam between modules: `extern` globals and common utilities
+│   ├── logic.c / logic.h     # Pure functions (sparklines, bars, thresholds) with tests
+│   ├── main.c                # Orchestrator: sensors, monitor, alarms, stats, sync, init and main()
+│   ├── watchdog.c / watchdog.h    # Per-task heartbeats and periodic review (vWatchdogBeat)
+│   ├── logger_csv.c / logger_csv.h # Writing and rotating readings.csv and events.csv
+│   ├── http_server.c / http_server.h # HTTP server: HTML dashboard and JSON metrics
+│   ├── dashboard.c / dashboard.h  # ANSI dashboard rendering (bars, sparklines, CPU per task)
+│   └── demos.c / demos.h     # Keyboard (vCommandTask) and demos: inversion, priorities, watchdog, backpressure
+├── tests/test_logic.c    # Unit tests (ctest)
+├── tools/plot_csv.py     # SVG chart of readings.csv with no dependencies
 └── docs/
-    ├── demo.gif          # Captura del dashboard en marcha
-    └── chart.svg         # Serie temporal generada por tools/plot_csv.py
+    ├── demo.gif          # Recording of the running dashboard
+    └── chart.svg         # Time series generated by tools/plot_csv.py
 ```
 
 ---
 
-## Licencia
+## License
 
-Este proyecto se distribuye bajo la licencia **MIT**. Consulta el archivo [`LICENSE`](LICENSE).
+This project is distributed under the **MIT** license. See the [`LICENSE`](LICENSE) file.

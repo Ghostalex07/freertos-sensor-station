@@ -14,7 +14,7 @@ find_package(Threads REQUIRED)
 
 if(DEFINED FREERTOS_KERNEL_PATH)
     get_filename_component(FREERTOS_KERNEL_PATH "${FREERTOS_KERNEL_PATH}" ABSOLUTE)
-    message(STATUS "Usando kernel local: ${FREERTOS_KERNEL_PATH}")
+    message(STATUS "Using local kernel: ${FREERTOS_KERNEL_PATH}")
     add_subdirectory("${FREERTOS_KERNEL_PATH}" freertos-kernel)
 else()
     include(FetchContent)
@@ -25,9 +25,9 @@ else()
     )
     FetchContent_MakeAvailable(freertos_kernel)
 
-    # Ancla de suministro: el tag debe apuntar exactamente al commit esperado.
-    # Si alguien mueve el tag V11.3.1 en GitHub, la configuracion falla en vez
-    # de descargar codigo no revisado.
+    # Supply-chain anchor: the tag must point at the exact expected commit.
+    # If someone moves the V11.3.1 tag on GitHub, configuration fails instead
+    # of downloading unreviewed code.
     set(FREERTOS_KERNEL_EXPECTED_SHA "3a22924e0a9ddbbc8b0758881c33b3422a5cc20d")
     find_package(Git QUIET)
     if(GIT_FOUND)
@@ -39,14 +39,14 @@ else()
             RESULT_VARIABLE FREERTOS_KERNEL_SHA_RESULT
         )
         if(NOT FREERTOS_KERNEL_SHA_RESULT EQUAL 0)
-            message(FATAL_ERROR "No se pudo leer el SHA del kernel FreeRTOS")
+            message(FATAL_ERROR "Could not read the FreeRTOS kernel SHA")
         endif()
         if(NOT FREERTOS_KERNEL_SHA STREQUAL FREERTOS_KERNEL_EXPECTED_SHA)
             message(FATAL_ERROR
-                "FreeRTOS-Kernel GIT_TAG V11.3.1 apunta a ${FREERTOS_KERNEL_SHA}, "
-                "se esperaba ${FREERTOS_KERNEL_EXPECTED_SHA}")
+                "FreeRTOS-Kernel GIT_TAG V11.3.1 points at ${FREERTOS_KERNEL_SHA}, "
+                "expected ${FREERTOS_KERNEL_EXPECTED_SHA}")
         endif()
-        message(STATUS "FreeRTOS-Kernel anclado en ${FREERTOS_KERNEL_SHA}")
+        message(STATUS "FreeRTOS-Kernel pinned at ${FREERTOS_KERNEL_SHA}")
     endif()
 endif()
 

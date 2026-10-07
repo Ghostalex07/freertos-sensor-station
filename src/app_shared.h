@@ -1,12 +1,13 @@
 #ifndef APP_SHARED_H
 #define APP_SHARED_H
 
-/* Estado global y utilidades compartidas entre los modulos de la demo.
+/* Global state and utilities shared across the demo modules.
  *
- * Antes todo vivia como `static` en main.c; al repartirlo en ficheros
- * se deja aqui la "costura": los objetos con un unico dueno siguen
- * `static` en su .c, y solo se publica lo que usan dos o mas modulos.
- * Los nombres no cambian: la extraccion fue mecanica. */
+ * Everything used to live as `static` in main.c; when it was split into
+ * several files this header became the "seam": objects with a single
+ * owner stay `static` in their .c, and only what two or more modules
+ * need is published here. The names never changed: the extraction was
+ * mechanical. */
 
 #include <signal.h>
 #include <stddef.h>
@@ -21,7 +22,7 @@
 
 #include "app_types.h"
 
-/* --- colas, semaforos y buffers compartidos -------------------------- */
+/* --- queues, semaphores and shared buffers --------------------------- */
 extern QueueHandle_t xSensorQueue;
 extern SemaphoreHandle_t xPrintMutex;
 extern SemaphoreHandle_t xStateMutex;
@@ -32,14 +33,14 @@ extern EventGroupHandle_t xInvEvents;
 extern StreamBufferHandle_t xReadingStream;
 extern MessageBufferHandle_t xEventMessage;
 
-/* --- estado global de la estacion ------------------------------------ */
+/* --- global state of the station ------------------------------------- */
 extern SystemState_t xSystemState;
 
-/* --- handles de tareas que tocan varios modulos ---------------------- */
+/* --- task handles touched by several modules ------------------------- */
 extern TaskHandle_t xMonitorTaskHandle;
 extern TaskHandle_t xStatsTaskHandle;
 
-/* --- flags de arranque, terminal y demos ----------------------------- */
+/* --- startup, terminal and demo flags -------------------------------- */
 extern volatile sig_atomic_t xShutdownRequested;
 extern volatile BaseType_t xDashboardEnabled;
 extern volatile BaseType_t xMonitorHangDemo;
@@ -48,42 +49,42 @@ extern volatile BaseType_t xSlowConsumer;
 extern BaseType_t xStdinIsTty;
 extern BaseType_t xStdoutIsTty;
 
-/* --- utilidades compartidas (definidas en main.c) -------------------- */
+/* --- shared utilities (defined in main.c) ---------------------------- */
 
-/* Marca de tiempo en milisegundos desde el reloj de pared. */
+/* Millisecond timestamp from the wall clock. */
 long long llEpochMs( void );
 
-/* Imprime una linea con prefijo de tiempo, bajo xPrintMutex. */
+/* Prints a line with a time prefix, under xPrintMutex. */
 void vPrintLine( const char * pcLine );
 
-/* Registra un evento: lo deja en xSystemState, lo manda al logger CSV
- * y, si no hay dashboard, lo imprime en pantalla. */
+/* Reports an event: stores it in xSystemState, forwards it to the CSV
+ * logger and, when there is no dashboard, prints it on screen. */
 #if defined( __GNUC__ )
 __attribute__( ( format( printf, 1, 2 ) ) )
 #endif
 void vReportEvent( const char * pcFormat,
                    ... );
 
-/* Salida ordenada del proceso (senal q o SIGINT/SIGTERM/SIGHUP). */
+/* Clean process exit (q key or SIGINT/SIGTERM/SIGHUP). */
 void vShutdown( void );
 
-/* "HH:MM:SS" a partir del tick actual. */
+/* "HH:MM:SS" from the current tick. */
 void vFormatUptime( char * pcBuffer,
                     size_t xBufferSize );
 
-/* Configuracion (nombre, umbral, periodo...) de un sensor. */
+/* Sensor configuration (name, threshold, period...). */
 const SensorConfig_t * pxGetSensorConfig( SensorId_t xId );
 
-/* Envia a la cola principal una lectura forzada por encima del umbral. */
+/* Queues a forced reading above the threshold on the main queue. */
 BaseType_t xQueueForcedReading( const SensorConfig_t * pxConfig,
                                 unsigned int * puiSeed );
 
-/* CPU ocupada (en decimas de %) a partir de una muestra de tareas. */
+/* Busy CPU (in tenths of %) from a task sample. */
 unsigned long ulBusyFromSample( const TaskStatus_t * pxStatus,
                                 UBaseType_t uxCount,
                                 configRUN_TIME_COUNTER_TYPE ulTotal );
 
-/* CPU ocupada (en decimas de %) del sistema en este instante. */
+/* Busy CPU (in tenths of %) of the system right now. */
 unsigned long ulBusyPercentX10( void );
 
 #endif

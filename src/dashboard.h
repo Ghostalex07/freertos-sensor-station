@@ -1,7 +1,7 @@
 #ifndef DASHBOARD_H
 #define DASHBOARD_H
 
-/* Pinta el dashboard (ANSI) en la terminal. Solo lo llama vStatsTask. */
+/* Paints the (ANSI) dashboard on the terminal. Only called by vStatsTask. */
 
 void vDashboardDraw( void );
 

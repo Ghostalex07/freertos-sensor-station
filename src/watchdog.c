@@ -1,8 +1,8 @@
-/* Vigia de latidos (watchdog) de la estacion de sensores.
+/* Heartbeat watchdog of the sensor station.
  *
- * Dos piezas: vWatchdogBeat() la llaman las propias tareas para decir
- * "sigo viva", y vWatchdogTask() compara cada latido con su timeout.
- * Tablas y estado son privados de este fichero. */
+ * Two pieces: vWatchdogBeat() is called by the tasks themselves to say
+ * "I am still alive", and vWatchdogTask() compares every beat against
+ * its timeout. Tables and state are private to this file. */
 
 #include <FreeRTOS.h>
 #include <task.h>
@@ -19,7 +19,7 @@ static const TickType_t xWatchdogTimeout[ WD_COUNT ] =
     pdMS_TO_TICKS( WATCHDOG_TIMEOUT_MS ),        /* hum    */
     pdMS_TO_TICKS( WATCHDOG_TIMEOUT_MS ),        /* monitor */
     pdMS_TO_TICKS( WATCHDOG_TIMEOUT_MS ),        /* alarm  */
-    pdMS_TO_TICKS( WATCHDOG_TIMEOUT_MS + 3000 ), /* stats: su periodo ya es de 5 s */
+    pdMS_TO_TICKS( WATCHDOG_TIMEOUT_MS + 3000 ), /* stats: its period is already 5 s */
     pdMS_TO_TICKS( WATCHDOG_TIMEOUT_MS ),        /* logger */
     pdMS_TO_TICKS( WATCHDOG_TIMEOUT_MS )         /* http   */
 };
@@ -61,8 +61,8 @@ void vWatchdogTask( void * pvParameters )
 
             if( ( uiIndex == ( unsigned int ) WD_MONITOR ) && ( xPaused != pdFALSE ) )
             {
-                /* Con los sensores en pausa el monitor no recibe lecturas:
-                 * su espera en la cola es legitima, no una colgada. */
+                /* With the sensors paused the monitor receives no
+                 * readings: waiting on the queue is legitimate, not a hang. */
                 xOverdue = pdFALSE;
             }
             else if( ( uiIndex == ( unsigned int ) WD_HTTP ) && ( xHttpEnabled == pdFALSE ) )
@@ -82,14 +82,14 @@ void vWatchdogTask( void * pvParameters )
                 xSystemState.ulWatchdogFails++;
                 xSemaphoreGive( xStateMutex );
 
-                vReportEvent( "WATCHDOG: tarea '%s' sin latido desde hace %u s",
+                vReportEvent( "WATCHDOG: task '%s' failed to beat for %u s",
                               pcWatchdogNames[ uiIndex ],
                               ( unsigned int ) ( ( xNow - xBeat ) / configTICK_RATE_HZ ) );
             }
             else if( ( xOverdue == pdFALSE ) && ( xWatchdogFlagged[ uiIndex ] != pdFALSE ) )
             {
                 xWatchdogFlagged[ uiIndex ] = pdFALSE;
-                vReportEvent( "WATCHDOG: tarea '%s' recupero el latido", pcWatchdogNames[ uiIndex ] );
+                vReportEvent( "WATCHDOG: task '%s' beat resumed", pcWatchdogNames[ uiIndex ] );
             }
 
             if( xOverdue != pdFALSE )

@@ -1,9 +1,9 @@
 #ifndef APP_TYPES_H
 #define APP_TYPES_H
 
-/* Tipos de datos de la estacion de sensores.
- * Se separan de las tareas porque casi todos los modulos los necesitan
- * (sensores, estado global, registros CSV y ids del watchdog). */
+/* Data types of the sensor station.
+ * They are separated from the tasks because almost every module needs
+ * them (sensors, global state, CSV records and watchdog ids). */
 
 #include <FreeRTOS.h>
 

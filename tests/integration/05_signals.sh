@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 05_signals.sh — SIGINT / SIGTERM / SIGHUP: salida limpia (rc=0) y sin
-# huerfanos. ~9 s.
+# 05_signals.sh — SIGINT / SIGTERM / SIGHUP: clean exit (rc=0) and no
+# orphans. ~9 s.
 #
-# La senal se manda SOLO al binario (hijo de `timeout`), nunca al grupo:
-# si `timeout` recibiera SIGHUP moriria con rc=129 y enmascararia el rc real
-# del binario. El binario se localiza por su PPID.
+# The signal is sent ONLY to the binary (the child of `timeout`), never
+# to the group: if `timeout` received SIGHUP it would die with rc=129 and
+# mask the real rc of the binary. The binary is located by its PPID.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 resolve_bin "${1:-}"
@@ -14,20 +14,20 @@ new_case
 for sig in INT TERM HUP; do
     start_bin
 
-    # 1) arranca y muestra la cabecera
-    if wait_for '=== Estacion de sensores FreeRTOS \(puerto POSIX\) ===' out.log 3; then
-        ok "$sig: arranca y muestra la cabecera"
+    # 1) it starts and shows the banner
+    if wait_for '=== Sensor station FreeRTOS \(POSIX port\) ===' out.log 3; then
+        ok "$sig: starts and shows the banner"
     else
-        fail "$sig: arranca y muestra la cabecera" "$(tail -n 15 out.log 2>/dev/null)"
+        fail "$sig: starts and shows the banner" "$(tail -n 15 out.log 2>/dev/null)"
     fi
 
-    # Localiza el binario: hijo directo de `timeout` (env hace exec, asi que
-    # conserva el PID) cuyo argv contenga la ruta del binario. El comm NO
-    # sirve: el puerto POSIX lo renombra a 'Scheduler'.
+    # Locate the binary: direct child of `timeout` (env execs, so the PID
+    # is kept) whose argv contains the binary path. The comm does NOT
+    # work: the POSIX port renames it to 'Scheduler'.
     binpid="$(ps -eo pid=,ppid=,args= | awk -v p="$PID" -v b="$BIN" \
         '$2 == p && index($0, b) > 0 { print $1; exit }')"
     if [ -z "$binpid" ]; then
-        # Fallback: cualquier proceso del binario dentro de nuestro PGID.
+        # Fallback: any process of the binary inside our PGID.
         for cand in $(it_live_binaries); do
             [ "$cand" = "$PID" ] && continue
             pg="$(ps -o pgid= -p "$cand" 2>/dev/null | tr -d '[:space:]')"
@@ -41,7 +41,7 @@ for sig in INT TERM HUP; do
     if [ -n "$binpid" ]; then
         kill "-$sig" "$binpid" 2>/dev/null || true
     else
-        diag "$sig: no se localizo el hijo, se anade el grupo"
+        diag "$sig: child not found, signalling the group"
         kill "-$sig" -- "-$PGID" 2>/dev/null || true
     fi
 
@@ -50,23 +50,23 @@ for sig in INT TERM HUP; do
     stop_bin
     rc=$?
 
-    # 2) termina con rc=0 en <=5 s
+    # 2) exits with rc=0 in <=5 s
     if [ -n "$binpid" ] && [ "$gone" -eq 1 ] && [ "$rc" -eq 0 ]; then
-        ok "$sig: termina con rc=0 (<=5 s)"
+        ok "$sig: exits with rc=0 (<=5 s)"
     else
-        fail "$sig: termina con rc=0 (<=5 s)" \
-            "rc=$rc terminado=$gone binpid=${binpid:-ninguno}"
+        fail "$sig: exits with rc=0 (<=5 s)" \
+            "rc=$rc finished=$gone binpid=${binpid:-none}"
     fi
 
-    # 3) mensaje de salida y cero huerfanos
+    # 3) exit message and zero orphans
     sal=0
-    LC_ALL=C grep -aq 'saliendo' out.log && sal=1
+    LC_ALL=C grep -aq 'exiting' out.log && sal=1
     orphans="$(it_live_binaries | tr '\n' ' ')"
     if [ "$sal" -eq 1 ] && [ -z "$orphans" ]; then
-        ok "$sig: 'saliendo' en salida y sin huerfanos"
+        ok "$sig: 'exiting' in output and no orphans"
     else
-        fail "$sig: 'saliendo' en salida y sin huerfanos" \
-            "saliendo=$sal huerfanos:${orphans:-ninguno}"
+        fail "$sig: 'exiting' in output and no orphans" \
+            "exiting=$sal orphans:${orphans:-none}"
     fi
 done
 

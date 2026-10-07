@@ -1,6 +1,6 @@
-/* Servidor HTTP embebido: sirve el dashboard en HTML y las metricas en
- * JSON (GET /metrics). Todo el E/S es no bloqueante con timeouts para
- * que un cliente lento no pueda colgar la tarea. */
+/* Embedded HTTP server: serves the HTML dashboard and the metrics as
+ * JSON (GET /metrics). All I/O is non-blocking with timeouts so a slow
+ * client cannot hang the task. */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -20,8 +20,8 @@
 #include "watchdog.h"
 #include "http_server.h"
 
-/* Envia todo lo indicado reintentando escrituras parciales.
- * MSG_NOSIGNAL evita SIGPIPE si el cliente cerra antes de tiempo. */
+/* Sends everything requested, retrying partial writes.
+ * MSG_NOSIGNAL avoids SIGPIPE if the client closes early. */
 static void vSendAll( int iSock,
                       const char * pcData,
                       int iLength )
@@ -64,16 +64,16 @@ static void vHttpHandleClient( int iClient )
     int iBodyLength;
     int iHeaderLength;
     int xWantJson;
-    const char * pcEstado;
-    const char * pcEstadoCss;
+    const char * pcState;
+    const char * pcStateCss;
     const char * pcContentType;
     const char * pcWdText;
     const char * pcWdCss;
 
     memset( pcRequest, 0, sizeof( pcRequest ) );
 
-    /* Retorno de recv comprobado: si falla o el cliente cierra sin datos,
-     * la peticion queda vacia y se sirve la pagina HTML por defecto. */
+    /* recv return checked: if it fails or the client closes without
+     * data, the request stays empty and the HTML page is served. */
     if( recv( iClient, pcRequest, sizeof( pcRequest ) - 1, MSG_DONTWAIT ) <= 0 )
     {
         pcRequest[ 0 ] = '\0';
@@ -104,23 +104,23 @@ static void vHttpHandleClient( int iClient )
 
     if( xSnapshot.xAlarmActive != pdFALSE )
     {
-        pcEstado = "alarma";
-        pcEstadoCss = "bad";
+        pcState = "alarm";
+        pcStateCss = "bad";
     }
     else if( xSnapshot.xSensorsPaused != pdFALSE )
     {
-        pcEstado = "pausa";
-        pcEstadoCss = "warn";
+        pcState = "paused";
+        pcStateCss = "warn";
     }
     else
     {
-        pcEstado = "normal";
-        pcEstadoCss = "good";
+        pcState = "normal";
+        pcStateCss = "good";
     }
 
     if( xSnapshot.xWatchdogActive != pdFALSE )
     {
-        pcWdText = "alerta";
+        pcWdText = "alert";
         pcWdCss = "bad";
     }
     else
@@ -132,17 +132,17 @@ static void vHttpHandleClient( int iClient )
     if( xWantJson != 0 )
     {
         iBodyLength = snprintf( pcBody, sizeof( pcBody ),
-                                "{\"uptime_s\":%lu,\"estado\":\"%s\",\"alarmas\":%lu,"
-                                "\"lecturas\":%lu,\"perdidas\":%lu,\"picos\":%lu,"
-                                "\"log_perdidas\":%lu,\"cola\":%u,\"heap_libre\":%u,"
-                                "\"watchdog\":\"%s\",\"watchdog_fallos\":%lu,"
-                                "\"cpu_ocupado_pct\":%lu.%lu,"
+                                "{\"uptime_s\":%lu,\"state\":\"%s\",\"alarms\":%lu,"
+                                "\"readings\":%lu,\"dropped\":%lu,\"spikes\":%lu,"
+                                "\"log_dropped\":%lu,\"queue\":%u,\"heap_free\":%u,"
+                                "\"watchdog\":\"%s\",\"watchdog_fails\":%lu,"
+                                "\"cpu_busy_pct\":%lu.%lu,"
                                 "\"cpu_pct\":{\"temp\":%lu.%lu,\"hum\":%lu.%lu,"
                                 "\"monitor\":%lu.%lu,\"alarm\":%lu.%lu},"
                                 "\"temp\":%d,\"hum\":%d,"
-                                "\"ultimo_evento\":\"%s\"}",
+                                "\"last_event\":\"%s\"}",
                                 ( unsigned long ) ( xTaskGetTickCount() / configTICK_RATE_HZ ),
-                                pcEstado,
+                                pcState,
                                 xSnapshot.ulAlarms,
                                 xSnapshot.ulReadings,
                                 xSnapshot.ulDropped,
@@ -170,32 +170,32 @@ static void vHttpHandleClient( int iClient )
     else
     {
         iBodyLength = snprintf( pcBody, sizeof( pcBody ),
-                                "<!doctype html>\n<html lang=\"es\">\n<head>\n"
+                                "<!doctype html>\n<html lang=\"en\">\n<head>\n"
                                 "<meta charset=\"utf-8\">\n"
                                 "<meta http-equiv=\"refresh\" content=\"2\">\n"
-                                "<title>Estacion FreeRTOS</title>\n"
+                                "<title>FreeRTOS station</title>\n"
                                 "<style>body{font-family:monospace;background:#0d1117;color:#c9d6d4;margin:2rem}"
                                 "h1{font-size:1.1rem}table{border-collapse:collapse}"
                                 "td,th{border:1px solid #30363d;padding:.35rem .7rem;text-align:left}"
                                 ".bad{color:#f85149}.good{color:#3fb950}.warn{color:#e3b341}</style>\n"
                                 "</head>\n<body>\n"
-                                "<h1>Estacion de sensores FreeRTOS</h1>\n"
-                                "<p>estado: <b class=\"%s\">%s</b> &nbsp; uptime: %s &nbsp; "
-                                "alarmas: %lu &nbsp; watchdog: <b class=\"%s\">%s</b></p>\n"
+                                "<h1>Sensor station FreeRTOS</h1>\n"
+                                "<p>state: <b class=\"%s\">%s</b> &nbsp; uptime: %s &nbsp; "
+                                "alarms: %lu &nbsp; watchdog: <b class=\"%s\">%s</b></p>\n"
                                 "<table>\n"
-                                "<tr><th>temperatura</th><td>%d C</td><th>humedad</th><td>%d %%</td></tr>\n"
-                                "<tr><th>lecturas</th><td>%lu</td><th>perdidas</th><td>%lu</td></tr>\n"
-                                "<tr><th>cola</th><td>%u/%u</td><th>heap libre</th><td>%u KiB</td></tr>\n"
-                                "<tr><th>cpu sistema</th><td>%lu.%lu%%</td>"
+                                "<tr><th>temperature</th><td>%d C</td><th>humidity</th><td>%d %%</td></tr>\n"
+                                "<tr><th>readings</th><td>%lu</td><th>dropped</th><td>%lu</td></tr>\n"
+                                "<tr><th>queue</th><td>%u/%u</td><th>free heap</th><td>%u KiB</td></tr>\n"
+                                "<tr><th>cpu system</th><td>%lu.%lu%%</td>"
                                 "<th>cpu monitor</th><td>%lu.%lu%%</td></tr>\n"
-                                "<tr><th>picos</th><td>%lu</td><th>log_perdidas</th><td>%lu</td></tr>\n"
+                                "<tr><th>spikes</th><td>%lu</td><th>log_dropped</th><td>%lu</td></tr>\n"
                                 "</table>\n"
-                                "<p>ultimo evento: %s</p>\n"
+                                "<p>last event: %s</p>\n"
                                 "<p>JSON: <a href=\"/metrics\">/metrics</a> &middot; "
-                                "auto-recarga cada 2 s</p>\n"
+                                "auto-refresh every 2 s</p>\n"
                                 "</body>\n</html>\n",
-                                pcEstadoCss,
-                                pcEstado,
+                                pcStateCss,
+                                pcState,
                                 pcUptime,
                                 xSnapshot.ulAlarms,
                                 pcWdCss,
@@ -253,7 +253,7 @@ void vHttpTask( void * pvParameters )
 
     if( iSock < 0 )
     {
-        vReportEvent( "http: socket() fallo (errno=%d)", errno );
+        vReportEvent( "http: socket() failed (errno=%d)", errno );
         vTaskDelete( NULL );
     }
 
@@ -266,7 +266,7 @@ void vHttpTask( void * pvParameters )
 
     if( bind( iSock, ( struct sockaddr * ) &xAddress, sizeof( xAddress ) ) < 0 )
     {
-        vReportEvent( "http: bind 127.0.0.1:%d fallo (errno=%d), servidor desactivado",
+        vReportEvent( "http: bind 127.0.0.1:%d failed (errno=%d), server disabled",
                       HTTP_PORT, errno );
         close( iSock );
         vTaskDelete( NULL );
@@ -274,14 +274,14 @@ void vHttpTask( void * pvParameters )
 
     if( listen( iSock, 4 ) < 0 )
     {
-        vReportEvent( "http: listen() fallo (errno=%d), servidor desactivado", errno );
+        vReportEvent( "http: listen() failed (errno=%d), server disabled", errno );
         close( iSock );
         vTaskDelete( NULL );
     }
 
     ( void ) fcntl( iSock, F_SETFL, O_NONBLOCK );
     xHttpEnabled = pdTRUE;
-    vReportEvent( "http: servidor JSON en http://127.0.0.1:%d (curl para verlo)", HTTP_PORT );
+    vReportEvent( "http: JSON server on http://127.0.0.1:%d (curl to see it)", HTTP_PORT );
 
     for( ; ; )
     {
@@ -291,8 +291,8 @@ void vHttpTask( void * pvParameters )
         {
             struct timeval xTimeout = { 2, 0 };
 
-            /* En Linux el socket aceptado no hereda O_NONBLOCK: timeouts
-             * acotan la E/S para que un cliente lento no cuelgue http. */
+            /* On Linux the accepted socket does not inherit O_NONBLOCK:
+             * timeouts bound the I/O so a slow client cannot hang http. */
             ( void ) setsockopt( iClient, SOL_SOCKET, SO_RCVTIMEO,
                                  &xTimeout, sizeof( xTimeout ) );
             ( void ) setsockopt( iClient, SOL_SOCKET, SO_SNDTIMEO,

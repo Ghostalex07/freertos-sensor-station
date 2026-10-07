@@ -1,19 +1,19 @@
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 
-/* Constantes de APLICACION de la estacion de sensores.
- * Aqui solo viven #define de la demo: periodos, umbrales, rutas CSV,
- * prioridades, tamanos de buffer y bits de evento.
- * La configuracion del kernel (FreeRTOSConfig.h) es otro asunto y no
- * se toca desde aqui. */
+/* APPLICATION constants of the sensor station.
+ * Only demo #defines live here: periods, thresholds, CSV paths,
+ * priorities, buffer sizes and event bits.
+ * The kernel configuration (FreeRTOSConfig.h) is a different matter and
+ * is not touched from here. */
 
 #define SENSOR_QUEUE_LENGTH    8
-/* 16 tareas en regimen + margen para las demos (inv, invdemo...) :
- * uxTaskGetSystemState devuelve 0 si el array no cabe, lo que romperia
- * las metricas de CPU. */
+/* 16 tasks in steady state + slack for the demos (inv, invdemo...) :
+ * uxTaskGetSystemState returns 0 if the array does not fit, which would
+ * break the CPU metrics. */
 #define TASK_STATUS_MAX        32
-/* Capacidad del contador de descartes: con la demo de consumidor lento
- * (k) se superan los 8 descartes por ventana de 5 s. */
+/* Capacity of the drop counter: with the slow consumer demo (k) the
+ * 8-drop-per-5-s-window limit is exceeded. */
 #define DROP_COUNT_MAX         1024
 #define TEMP_ALARM_THRESHOLD   40
 #define HUM_ALARM_THRESHOLD    85

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 01_keys.sh — teclas rapidas en modo linea (stdin = FIFO, sin TTY). ~6 s.
+# 01_keys.sh — quick keys in line mode (stdin = FIFO, no TTY). ~6 s.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 resolve_bin "${1:-}"
@@ -7,97 +7,97 @@ begin 10
 new_case
 start_bin
 
-# 1) arranque en pipe: cabecera + ayuda (<=3 s)
-if wait_for '=== Estacion de sensores FreeRTOS \(puerto POSIX\) ===' out.log 3 &&
-    LC_ALL=C grep -aqF 'teclas: [t]=temp alarma' out.log; then
-    ok "cabecera y ayuda en modo linea (<=3 s)"
+# 1) start on a pipe: banner + help (<=3 s)
+if wait_for '=== Sensor station FreeRTOS \(POSIX port\) ===' out.log 3 &&
+    LC_ALL=C grep -aqF 'keys: [t]=temp alarm' out.log; then
+    ok "banner and help in line mode (<=3 s)"
 else
-    fail "cabecera y ayuda en modo linea (<=3 s)" \
+    fail "banner and help in line mode (<=3 s)" \
         "$(tail -n 20 out.log 2>/dev/null)"
 fi
 
-# 2) stats periodicos (STATS_PERIOD_MS=5000)
-if wait_for 'stats: lecturas=' out.log 8; then
-    ok "stats periodicos (<=8 s)"
+# 2) periodic stats (STATS_PERIOD_MS=5000)
+if wait_for 'stats: readings=' out.log 8; then
+    ok "periodic stats (<=8 s)"
 else
-    fail "stats periodicos (<=8 s)" "$(tail -n 20 out.log 2>/dev/null)"
+    fail "periodic stats (<=8 s)" "$(tail -n 20 out.log 2>/dev/null)"
 fi
 
-# 3) t -> lectura de temperatura forzada (o cola llena)
+# 3) t -> forced temperature reading (or full queue)
 send_key 't'
-if wait_for 'manual: inyectada lectura de temperatura forzada|manual: cola llena' out.log 3; then
-    ok "tecla t inyecta temperatura forzada"
+if wait_for 'manual: injected forced temperature reading|manual: queue full' out.log 3; then
+    ok "key t injects a forced temperature reading"
 else
-    fail "tecla t inyecta temperatura forzada" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key t injects a forced temperature reading" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 4) h -> lectura de humedad forzada
+# 4) h -> forced humidity reading
 send_key 'h'
-if wait_for 'manual: inyectada lectura de humedad forzada|manual: cola llena' out.log 3; then
-    ok "tecla h inyecta humedad forzada"
+if wait_for 'manual: injected forced humidity reading|manual: queue full' out.log 3; then
+    ok "key h injects a forced humidity reading"
 else
-    fail "tecla h inyecta humedad forzada" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key h injects a forced humidity reading" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 5) p -> pausa, c -> reanudacion
+# 5) p -> pause, c -> resume
 send_key 'p'
 p_ok=0
-wait_for 'manual: sensores pausados' out.log 3 && p_ok=1
+wait_for 'manual: sensors paused' out.log 3 && p_ok=1
 send_key 'c'
 c_ok=0
-wait_for 'manual: sensores reanudados' out.log 3 && c_ok=1
+wait_for 'manual: sensors resumed' out.log 3 && c_ok=1
 if [ "$p_ok" -eq 1 ] && [ "$c_ok" -eq 1 ]; then
-    ok "teclas p/c pausan y reanudan"
+    ok "keys p/c pause and resume"
 else
-    fail "teclas p/c pausan y reanudan" "p=$p_ok c=$c_ok"
+    fail "keys p/c pause and resume" "p=$p_ok c=$c_ok"
 fi
 
-# 6) r -> reset de alarmas
+# 6) r -> reset the alarm counter
 send_key 'r'
-if wait_for 'manual: contador de alarmas reiniciado' out.log 3; then
-    ok "tecla r reinicia el contador de alarmas"
+if wait_for 'manual: alarm counter reset' out.log 3; then
+    ok "key r resets the alarm counter"
 else
-    fail "tecla r reinicia el contador de alarmas" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key r resets the alarm counter" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 7) k -> presion inversa (consumidor lento)
+# 7) k -> backpressure (slow consumer)
 send_key 'k'
-if wait_for 'presion inversa: consumidor lento ACTIVADO' out.log 3; then
-    ok "tecla k activa el consumidor lento"
+if wait_for 'backpressure: slow consumer ENABLED' out.log 3; then
+    ok "key k enables the slow consumer"
 else
-    fail "tecla k activa el consumidor lento" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key k enables the slow consumer" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 8) d -> sin TTY no hay dashboard
+# 8) d -> no dashboard without a TTY
 send_key 'd'
-if wait_for 'dashboard no disponible sin terminal' out.log 3; then
-    ok "tecla d rechaza dashboard sin terminal"
+if wait_for 'dashboard unavailable without a terminal' out.log 3; then
+    ok "key d rejects the dashboard without a terminal"
 else
-    fail "tecla d rechaza dashboard sin terminal" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key d rejects the dashboard without a terminal" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 9) ? -> vuelve a imprimir la ayuda (>=2 ocurrencias de 'teclas:')
+# 9) ? -> prints the help again (>=2 occurrences of 'keys:')
 send_key '?'
-if wait_count 'teclas:' out.log 2 3; then
-    ok "tecla ? imprime la ayuda"
+if wait_count 'keys:' out.log 2 3; then
+    ok "key ? prints the help"
 else
-    fail "tecla ? imprime la ayuda" \
-        "ocurrencias=$(LC_ALL=C grep -acE 'teclas:' out.log 2>/dev/null)"
+    fail "key ? prints the help" \
+        "occurrences=$(LC_ALL=C grep -acE 'keys:' out.log 2>/dev/null)"
 fi
 
-# 10) q -> salida limpia (rc=0 y 'saliendo')
+# 10) q -> clean exit (rc=0 and 'exiting')
 send_key 'q'
 sal=0
-wait_for 'saliendo' out.log 5 && sal=1
+wait_for 'exiting' out.log 5 && sal=1
 gone=0
 wait_gone "$PID" 5 && gone=1
 stop_bin
 rc=$?
 if [ "$sal" -eq 1 ] && [ "$gone" -eq 1 ] && [ "$rc" -eq 0 ]; then
-    ok "tecla q sale con rc=0 y 'saliendo'"
+    ok "key q exits with rc=0 and 'exiting'"
 else
-    fail "tecla q sale con rc=0 y 'saliendo'" \
-        "rc=$rc saliendo=$sal terminado=$gone" "$(tail -n 10 out.log 2>/dev/null)"
+    fail "key q exits with rc=0 and 'exiting'" \
+        "rc=$rc exiting=$sal finished=$gone" "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
 finish
