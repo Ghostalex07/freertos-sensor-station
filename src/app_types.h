@@ -59,6 +59,12 @@ typedef struct
 
 typedef struct
 {
+    long long llEpochMs;
+    char pcText[ EVENT_BUFFER_SIZE ];
+} EventEntry_t;
+
+typedef struct
+{
     int iLastTempValue;
     int iLastHumValue;
     unsigned long ulReadings;
@@ -81,6 +87,11 @@ typedef struct
     unsigned long ulCpuMonitorX10;
     unsigned long ulCpuAlarmX10;
     char pcLastEvent[ EVENT_BUFFER_SIZE ];
+    /* Ring of the last EVENT_RING_SIZE events: uiEventNext counts every
+     * event ever reported, the valid ones live in
+     * [uiEventNext - count, uiEventNext) modulo EVENT_RING_SIZE. */
+    EventEntry_t xEventRing[ EVENT_RING_SIZE ];
+    unsigned int uiEventNext;
 } SystemState_t;
 
 #endif

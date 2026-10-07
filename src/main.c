@@ -251,6 +251,18 @@ void vReportEvent( const char * pcFormat,
     xSemaphoreTake( xStateMutex, portMAX_DELAY );
     ( void ) strncpy( xSystemState.pcLastEvent, pcBuffer, sizeof( xSystemState.pcLastEvent ) - 1 );
     xSystemState.pcLastEvent[ sizeof( xSystemState.pcLastEvent ) - 1 ] = '\0';
+
+    /* Append to the ring behind /events (same critical section). */
+    {
+        EventEntry_t * pxEntry = &xSystemState.xEventRing[ xSystemState.uiEventNext %
+                                                           EVENT_RING_SIZE ];
+
+        pxEntry->llEpochMs = llEpochMs();
+        ( void ) strncpy( pxEntry->pcText, pcBuffer, sizeof( pxEntry->pcText ) - 1 );
+        pxEntry->pcText[ sizeof( pxEntry->pcText ) - 1 ] = '\0';
+        xSystemState.uiEventNext++;
+    }
+
     xSemaphoreGive( xStateMutex );
 
     if( xEventMessage != NULL )

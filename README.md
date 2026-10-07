@@ -194,10 +194,13 @@ python3 tools/plot_csv.py readings.csv docs/chart.svg   # generates the time ser
 curl http://127.0.0.1:8080/metrics
 # {"uptime_s":2,"state":"normal","alarms":0,...,"cpu_pct":{"temp":0.4,...},...}
 
+curl http://127.0.0.1:8080/events
+# {"events":[{"epoch_ms":...,"event":"..."}, ...]}   # last 10 events
+
 curl http://127.0.0.1:8080/          # HTML page auto-refreshing every 2 s
 ```
 
-The JSON now includes **`cpu_pct` with the CPU usage (%) of temp, hum, monitor and alarm**, plus **`isr_events`** (readings injected from the tick hook) and **`max_age_ms`** (worst-case end-to-end reading age). The connection closes itself after the response (no `keep-alive`) and uses `MSG_DONTWAIT` so it never blocks the scheduler.
+Besides `/metrics`, **`/events` exposes the ring of the last 10 events** (timestamp + text, oldest first), and the HTML page shows the last 5 of them. The JSON of `/metrics` includes **`cpu_pct` with the CPU usage (%) of temp, hum, monitor and alarm**, plus **`isr_events`** (readings injected from the tick hook) and **`max_age_ms`** (worst-case end-to-end reading age). The connection closes itself after the response (no `keep-alive`) and uses `MSG_DONTWAIT` so it never blocks the scheduler.
 
 ### Watchdog
 

@@ -82,7 +82,7 @@ PY
 }
 
 resolve_bin "${1:-}"
-begin 5
+begin 6
 new_case
 start_bin
 
@@ -139,7 +139,27 @@ else
         "code=$code" "$(head -n 5 index.html 2>/dev/null)"
 fi
 
-# 5) q -> rc=0
+# 5) GET /events -> 200 with the ring of recent events
+code="$(curl -s -o events.json -w '%{http_code}' --max-time 3 \
+    'http://127.0.0.1:8080/events' || echo 000)"
+if [ "$code" = "200" ] &&
+    python3 -c '
+import json, sys
+with open("events.json", "rb") as fh:
+    ev = json.load(fh)["events"]
+if not isinstance(ev, list) or len(ev) < 1:
+    sys.exit(1)
+if not all(isinstance(e, dict) and "epoch_ms" in e and "event" in e
+           and e["event"] for e in ev):
+    sys.exit(1)
+' 2>/dev/null; then
+    ok "GET /events -> 200 with the event ring"
+else
+    fail "GET /events -> 200 with the event ring" \
+        "code=$code" "$(head -c 300 events.json 2>/dev/null)"
+fi
+
+# 6) q -> rc=0
 send_key 'q'
 sal=0
 wait_for 'exiting' out.log 5 && sal=1

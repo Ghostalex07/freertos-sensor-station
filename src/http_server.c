@@ -51,12 +51,123 @@ static void vSendAll( int iSock,
     }
 }
 
+/* Flattens quotes exactly like pcLastEvent so the text is safe inside
+ * JSON strings and HTML without a full escaper. */
+static void vSanitizeEvent( const char * pcIn,
+                            char * pcOut,
+                            size_t xOutSize )
+{
+    size_t i;
+
+    for( i = 0; ( i + 1U < xOutSize ) && ( pcIn[ i ] != '\0' ); i++ )
+    {
+        pcOut[ i ] = ( pcIn[ i ] == '"' ) ? '\'' : pcIn[ i ];
+    }
+
+    pcOut[ i ] = '\0';
+}
+
+/* GET /events: the last EVENT_RING_SIZE events, oldest first.
+ * Returns the body length or -1 if it does not fit. */
+static int iBuildEventsJson( const SystemState_t * pxSnapshot,
+                             char * pcOut,
+                             size_t xOutSize )
+{
+    char pcSafe[ EVENT_BUFFER_SIZE ];
+    unsigned int uiCount;
+    unsigned int ui;
+    size_t xUsed;
+    int iWrote;
+
+    uiCount = ( pxSnapshot->uiEventNext < EVENT_RING_SIZE ) ?
+              pxSnapshot->uiEventNext : EVENT_RING_SIZE;
+
+    iWrote = snprintf( pcOut, xOutSize, "{\"events\":[" );
+
+    if( ( iWrote < 0 ) || ( ( size_t ) iWrote >= xOutSize ) )
+    {
+        return -1;
+    }
+
+    xUsed = ( size_t ) iWrote;
+
+    for( ui = 0; ui < uiCount; ui++ )
+    {
+        const EventEntry_t * pxEntry = &pxSnapshot->xEventRing[
+            ( pxSnapshot->uiEventNext - uiCount + ui ) % EVENT_RING_SIZE ];
+
+        vSanitizeEvent( pxEntry->pcText, pcSafe, sizeof( pcSafe ) );
+        iWrote = snprintf( pcOut + xUsed, xOutSize - xUsed,
+                           "%s{\"epoch_ms\":%lld,\"event\":\"%s\"}",
+                           ( ui == 0U ) ? "" : ",",
+                           pxEntry->llEpochMs,
+                           pcSafe );
+
+        if( ( iWrote < 0 ) || ( ( size_t ) iWrote >= ( xOutSize - xUsed ) ) )
+        {
+            return -1;
+        }
+
+        xUsed += ( size_t ) iWrote;
+    }
+
+    iWrote = snprintf( pcOut + xUsed, xOutSize - xUsed, "]}" );
+
+    if( ( iWrote < 0 ) || ( ( size_t ) iWrote >= ( xOutSize - xUsed ) ) )
+    {
+        return -1;
+    }
+
+    return ( int ) ( xUsed + ( size_t ) iWrote );
+}
+
+/* Last 5 events, newest first, as <li> items for the HTML page. */
+static void vBuildEventsHtml( const SystemState_t * pxSnapshot,
+                              char * pcOut,
+                              size_t xOutSize )
+{
+    char pcSafe[ EVENT_BUFFER_SIZE ];
+    unsigned int uiCount;
+    unsigned int ui;
+    size_t xUsed = 0;
+    int iWrote;
+
+    uiCount = ( pxSnapshot->uiEventNext < EVENT_RING_SIZE ) ?
+              pxSnapshot->uiEventNext : EVENT_RING_SIZE;
+
+    if( uiCount > 5U )
+    {
+        uiCount = 5U;
+    }
+
+    pcOut[ 0 ] = '\0';
+
+    for( ui = 0; ui < uiCount; ui++ )
+    {
+        const EventEntry_t * pxEntry = &pxSnapshot->xEventRing[
+            ( pxSnapshot->uiEventNext - 1U - ui ) % EVENT_RING_SIZE ];
+
+        vSanitizeEvent( pxEntry->pcText, pcSafe, sizeof( pcSafe ) );
+        iWrote = snprintf( pcOut + xUsed, xOutSize - xUsed, "<li>%s</li>\n",
+                           pcSafe );
+
+        if( ( iWrote < 0 ) || ( ( size_t ) iWrote >= ( xOutSize - xUsed ) ) )
+        {
+            pcOut[ xUsed ] = '\0';
+            return;
+        }
+
+        xUsed += ( size_t ) iWrote;
+    }
+}
+
 static void vHttpHandleClient( int iClient )
 {
-    static char pcBody[ 2048 ];
+    static char pcBody[ 4096 ];
     char pcHeader[ 256 ];
     char pcRequest[ 512 ];
     char pcEvent[ EVENT_BUFFER_SIZE ];
+    char pcEventList[ 768 ];
     char pcUptime[ 16 ];
     SystemState_t xSnapshot;
     unsigned long ulBusy;
@@ -64,6 +175,7 @@ static void vHttpHandleClient( int iClient )
     int iBodyLength;
     int iHeaderLength;
     int xWantJson;
+    int xWantEvents;
     const char * pcState;
     const char * pcStateCss;
     const char * pcContentType;
@@ -80,6 +192,7 @@ static void vHttpHandleClient( int iClient )
     }
 
     xWantJson = ( strncmp( pcRequest, "GET /metrics", 12 ) == 0 ) ? 1 : 0;
+    xWantEvents = ( strncmp( pcRequest, "GET /events", 11 ) == 0 ) ? 1 : 0;
 
     xSemaphoreTake( xStateMutex, portMAX_DELAY );
     xSnapshot = xSystemState;
@@ -170,8 +283,14 @@ static void vHttpHandleClient( int iClient )
                                 pcEvent );
         pcContentType = "application/json; charset=utf-8";
     }
+    else if( xWantEvents != 0 )
+    {
+        iBodyLength = iBuildEventsJson( &xSnapshot, pcBody, sizeof( pcBody ) );
+        pcContentType = "application/json; charset=utf-8";
+    }
     else
     {
+        vBuildEventsHtml( &xSnapshot, pcEventList, sizeof( pcEventList ) );
         iBodyLength = snprintf( pcBody, sizeof( pcBody ),
                                 "<!doctype html>\n<html lang=\"en\">\n<head>\n"
                                 "<meta charset=\"utf-8\">\n"
@@ -195,7 +314,9 @@ static void vHttpHandleClient( int iClient )
                                 "<tr><th>ISR events</th><td>%lu</td><th>max age</th><td>%lu ms</td></tr>\n"
                                 "</table>\n"
                                 "<p>last event: %s</p>\n"
+                                "<p>recent events:</p>\n<ul>\n%s</ul>\n"
                                 "<p>JSON: <a href=\"/metrics\">/metrics</a> &middot; "
+                                "<a href=\"/events\">/events</a> &middot; "
                                 "auto-refresh every 2 s</p>\n"
                                 "</body>\n</html>\n",
                                 pcStateCss,
@@ -219,7 +340,8 @@ static void vHttpHandleClient( int iClient )
                                 xSnapshot.ulLogDrops,
                                 xSnapshot.ulIsrEvents,
                                 xSnapshot.ulMaxAgeMs,
-                                pcEvent );
+                                pcEvent,
+                                pcEventList );
         pcContentType = "text/html; charset=utf-8";
     }
 

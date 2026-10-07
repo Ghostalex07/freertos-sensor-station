@@ -39,8 +39,10 @@
 
 #define FORCED_OVERSHOOT       5
 #define FORCED_JITTER          10
-#define PRINT_BUFFER_SIZE      160
-#define EVENT_BUFFER_SIZE      96
+#define PRINT_BUFFER_SIZE     160
+#define EVENT_BUFFER_SIZE     96
+/* Events kept in memory for the /events endpoint and the HTML page. */
+#define EVENT_RING_SIZE       10
 #define CPU_BAR_WIDTH          24
 #define VALUE_BAR_WIDTH        28
 
