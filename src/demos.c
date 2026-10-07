@@ -19,7 +19,7 @@
 
 const char * pcHelpText =
     "keys: [t]=temp alarm [h]=hum alarm [p]=pause [c]=continue [r]=reset [d]=dashboard\n"
-    "      [w]=watchdog [i]=inversion [v]=priority [k]=backpressure [s]=tasks [q]=exit [?]=help";
+    "      [w]=watchdog [i]=inversion [v]=priority [k]=backpressure [f]=isr [y]=deadlock [s]=tasks [q]=exit [?]=help";
 
 /* State of the interactive demos (v, i, ... keys): private to this file,
  * only vCommandTask and the inversion tasks touch it. */
@@ -152,6 +152,58 @@ static void vInversionDemoTask( void * pvParameters )
     vTaskDelete( NULL );
 }
 
+/* --- demo 'y': recoverable AB/BA deadlock ---------------------------- */
+
+static volatile BaseType_t xDeadlockDemoRunning = pdFALSE;
+static int iDeadlockRemaining = 0;
+
+/* Classic circular wait: dl1 grabs lock A then fights for B, dl2 grabs B
+ * then fights for A. The second take ALWAYS has a timeout: that bounded
+ * wait is what breaks the cycle (an unbounded take would hang forever).
+ * dl2 starts holding later so dl1 is the one that times out first and
+ * releases A, which unblocks dl2. */
+static void vDeadlockRun( SemaphoreHandle_t xFirst,
+                          SemaphoreHandle_t xSecond,
+                          const char * pcName,
+                          TickType_t xHoldDelay )
+{
+    ( void ) xSemaphoreTake( xFirst, portMAX_DELAY );
+    vTaskDelay( xHoldDelay );
+
+    if( xSemaphoreTake( xSecond, pdMS_TO_TICKS( DEADLOCK_TIMEOUT_MS ) ) == pdPASS )
+    {
+        vReportEvent( "deadlock: %s acquired both locks after the other task released",
+                      pcName );
+        ( void ) xSemaphoreGive( xSecond );
+    }
+    else
+    {
+        vReportEvent( "deadlock: %s timed out after %d ms waiting for the second lock (recovered)",
+                      pcName, DEADLOCK_TIMEOUT_MS );
+    }
+
+    ( void ) xSemaphoreGive( xFirst );
+
+    if( __atomic_sub_fetch( &iDeadlockRemaining, 1, __ATOMIC_RELAXED ) == 0 )
+    {
+        xDeadlockDemoRunning = pdFALSE;
+    }
+
+    vTaskDelete( NULL );
+}
+
+static void vDeadlockDl1( void * pvParameters )
+{
+    ( void ) pvParameters;
+    vDeadlockRun( xDeadlockA, xDeadlockB, "dl1", pdMS_TO_TICKS( DEADLOCK_LOCK_TICKS ) );
+}
+
+static void vDeadlockDl2( void * pvParameters )
+{
+    ( void ) pvParameters;
+    vDeadlockRun( xDeadlockB, xDeadlockA, "dl2", pdMS_TO_TICKS( DEADLOCK_LOCK2_TICKS ) );
+}
+
 void vCommandTask( void * pvParameters )
 {
     const SensorConfig_t * pxConfig;
@@ -238,6 +290,56 @@ void vCommandTask( void * pvParameters )
                         vReportEvent( "backpressure: slow consumer %s (%d s per reading)",
                                       ( xSlowConsumer != pdFALSE ) ? "ENABLED" : "disabled",
                                       SLOW_CONSUMER_MS / 1000 );
+                        break;
+
+                    case 'f':
+                        /* Written from task context, read from the tick
+                         * hook (ISR): volatile + the kernel queue do the
+                         * rest. */
+                        xIsrDemoEnabled = ( xIsrDemoEnabled == pdFALSE ) ? pdTRUE : pdFALSE;
+                        vReportEvent( "isr: demo %s (1 event/s from vApplicationTickHook via xQueueSendFromISR)",
+                                      ( xIsrDemoEnabled != pdFALSE ) ? "enabled" : "disabled" );
+                        break;
+
+                    case 'y':
+                        if( xDeadlockDemoRunning != pdFALSE )
+                        {
+                            vReportEvent( "deadlock: demo already running" );
+                        }
+                        else
+                        {
+                            TaskHandle_t xDl1 = NULL;
+                            TaskHandle_t xDl2 = NULL;
+                            BaseType_t xCreated;
+
+                            iDeadlockRemaining = 2;
+                            xDeadlockDemoRunning = pdTRUE;
+                            xCreated = xTaskCreate( vDeadlockDl1, "dl1", DEADLOCK_STACK_WORDS,
+                                                    NULL, PRIORITY_ALARM, &xDl1 );
+
+                            if( xCreated == pdPASS )
+                            {
+                                xCreated = xTaskCreate( vDeadlockDl2, "dl2", DEADLOCK_STACK_WORDS,
+                                                        NULL, PRIORITY_ALARM, &xDl2 );
+                            }
+
+                            if( xCreated == pdPASS )
+                            {
+                                vReportEvent( "deadlock: demo started (AB/BA, the second take has a %d ms timeout)",
+                                              DEADLOCK_TIMEOUT_MS );
+                            }
+                            else
+                            {
+                                if( xDl1 != NULL )
+                                {
+                                    vTaskDelete( xDl1 );
+                                }
+
+                                iDeadlockRemaining = 0;
+                                xDeadlockDemoRunning = pdFALSE;
+                                vReportEvent( "deadlock: could not create the demo tasks" );
+                            }
+                        }
                         break;
 
                     case 'v':

@@ -29,6 +29,9 @@ extern SemaphoreHandle_t xStateMutex;
 extern SemaphoreHandle_t xDropSemaphore;
 extern SemaphoreHandle_t xInvBinary;
 extern SemaphoreHandle_t xInvMutex;
+/* Only the deadlock demo (key y) touches these two mutexes. */
+extern SemaphoreHandle_t xDeadlockA;
+extern SemaphoreHandle_t xDeadlockB;
 extern EventGroupHandle_t xInvEvents;
 extern StreamBufferHandle_t xReadingStream;
 extern MessageBufferHandle_t xEventMessage;
@@ -46,6 +49,9 @@ extern volatile BaseType_t xDashboardEnabled;
 extern volatile BaseType_t xMonitorHangDemo;
 extern volatile BaseType_t xHttpEnabled;
 extern volatile BaseType_t xSlowConsumer;
+/* Demo 'f': read from vApplicationTickHook (ISR context), written by the
+ * command task. */
+extern volatile BaseType_t xIsrDemoEnabled;
 extern BaseType_t xStdinIsTty;
 extern BaseType_t xStdoutIsTty;
 

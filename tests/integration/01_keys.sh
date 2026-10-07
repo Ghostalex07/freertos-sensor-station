@@ -9,7 +9,9 @@ start_bin
 
 # 1) start on a pipe: banner + help (<=3 s)
 if wait_for '=== Sensor station FreeRTOS \(POSIX port\) ===' out.log 3 &&
-    LC_ALL=C grep -aqF 'keys: [t]=temp alarm' out.log; then
+    LC_ALL=C grep -aqF 'keys: [t]=temp alarm' out.log &&
+    LC_ALL=C grep -aqF '[f]=isr' out.log &&
+    LC_ALL=C grep -aqF '[y]=deadlock' out.log; then
     ok "banner and help in line mode (<=3 s)"
 else
     fail "banner and help in line mode (<=3 s)" \

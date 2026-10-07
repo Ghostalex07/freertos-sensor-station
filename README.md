@@ -13,13 +13,14 @@ Educational **FreeRTOS** demo that simulates a temperature and humidity sensor s
 - ⏱️ **Guaranteed periodicity** with `vTaskDelayUntil` (no drift accumulates).
 - ⌨️ **Interactive interface** over stdin in raw terminal mode: inject spikes, pause sensors, reset counters.
 - 🖥️ **Interactive dashboard** in the terminal (key `d`): temperature/humidity/queue/heap bars, **CPU % per task** (`uxTaskGetSystemState` + run-time stats at 1 µs) and **sparklines** with the last 32 readings.
-- 📊 **Own telemetry**: free heap, task count, minimum stack and CPU usage every 5 s.
+- 📊 **Own telemetry**: free heap, task count, minimum stack, CPU usage every 5 s, ISR events injected by the tick hook and the worst-case reading age (`max_age_ms`).
 - 📝 **CSV logging**: the `logger` task writes `readings.csv` (every reading) and `events.csv` (alarms, watchdog, events) through a **stream buffer** and a **message buffer**.
 - 🐕 **Software watchdog**: it watches the heartbeat of the 7 tasks; if one exceeds its timeout it reports it as an event (stall it with `w` to see it in action).
 - 🌐 **HTTP endpoint**: minimal JSON server on `127.0.0.1:8080/metrics` with state, CPU %, heap, watchdog and latest reading (`curl` to see it).
 - 🛑 **Clean shutdown with signals**: `SIGINT`, `SIGTERM` and `SIGHUP` end the demo gracefully (also with stdin closed).
 - 🔀 **Stream/message buffers**: binary for readings (stream) and text for events (message buffer), both real FreeRTOS primitives.
-- 🧰 **Advanced primitives with an interactive demo**: queue of queues (*queue set*) + `xQueueOverwrite`/`xQueuePeek`, temp+hum synchronization with an event group, priority inversion semaphore vs mutex (key `i`), `vTaskPrioritySet` (key `v`), backpressure with a slow consumer (key `k`) and a `vTaskList` dump (key `s`).
+- 🧰 **Advanced primitives with an interactive demo**: queue of queues (*queue set*) + `xQueueOverwrite`/`xQueuePeek`, temp+hum synchronization with an event group, priority inversion semaphore vs mutex (key `i`), `vTaskPrioritySet` (key `v`), backpressure with a slow consumer (key `k`), ISR simulation with the FromISR APIs (key `f`), a recoverable AB/BA deadlock (key `y`) and a `vTaskList` dump (key `s`).
+- ⏳ **End-to-end latency**: every reading carries its birth tick, so `max_age_ms` measures the worst age from producer to consumer (run the `k` demo and watch it spike).
 - 🖼️ **HTML page** at `http://127.0.0.1:8080/` (besides the JSON `/metrics`, now with **CPU % per task**).
 - 📜 **CSV rotation**: `readings.csv` rotates to `readings.1.csv` past 64 KiB.
 - 🧪 **Unit tests**: pure functions in `src/logic.c` tested with `ctest` (`tests/test_logic.c`).
@@ -80,6 +81,8 @@ Press the keys while the application is running. If stdout is a **terminal**, th
 | `i` | **Priority inversion**: the LOW task takes the resource (binary semaphore in the 1st phase, mutex with inheritance in the 2nd phase); the HIGH task waits and its blocking time is printed |
 | `v` | **`vTaskPrioritySet`**: drops `monitor` from priority 3 to 1 for 5 s and restores it |
 | `k` | **Backpressure**: enables/disables a slow consumer (2 s per reading) and watch `dropped` rise |
+| `f` | **ISR simulation**: while enabled, `vApplicationTickHook` (ISR context) injects 1 fake reading/s with `xQueueSendFromISR` + `portYIELD_FROM_ISR` |
+| `y` | **Recoverable deadlock**: two tasks take two mutexes AB/BA; the second take has a 1000 ms timeout that breaks the circular wait |
 | `s` | **`vTaskList`**: dumps the state of every task to `tasks.txt` (and prints it in line mode) |
 | `q` | Exits the application cleanly |
 | `?` | Shows the help |
@@ -162,6 +165,8 @@ Press the keys while the application is running. If stdout is a **terminal**, th
 | **Backpressure** | blocking consumer + `xSemaphoreGive` (counting) | Demo `k`: with the queue full, the drops grow and are counted in `dropped`. |
 | **Static allocation** | `xTaskCreateStatic` | The `logger` task uses a static TCB and stack (no `pvPortMalloc`). |
 | **`vTaskList`** | `vTaskList` (trace facility) | Demo `s`: dumps name/state/priority/stack of every task to `tasks.txt`. |
+| **ISR context** | `vApplicationTickHook`, `xQueueSendFromISR`, `portYIELD_FROM_ISR` | Demo `f`: the tick interrupt injects a fake reading every second; in ISR context only the FromISR API family is legal. |
+| **Bounded wait** | `xSemaphoreTake` with timeout | Demo `y`: the AB/BA circular wait is broken by the 1000 ms timeout on the second take (the escape hatch from deadlock). |
 | **POSIX sockets** | `socket`, `accept`, `send` | The `http` task exposes `127.0.0.1:8080` (JSON and HTML) outside the kernel, LWIP-style. |
 
 ---
@@ -192,7 +197,7 @@ curl http://127.0.0.1:8080/metrics
 curl http://127.0.0.1:8080/          # HTML page auto-refreshing every 2 s
 ```
 
-The JSON now includes **`cpu_pct` with the CPU usage (%) of temp, hum, monitor and alarm**. The connection closes itself after the response (no `keep-alive`) and uses `MSG_DONTWAIT` so it never blocks the scheduler.
+The JSON now includes **`cpu_pct` with the CPU usage (%) of temp, hum, monitor and alarm**, plus **`isr_events`** (readings injected from the tick hook) and **`max_age_ms`** (worst-case end-to-end reading age). The connection closes itself after the response (no `keep-alive`) and uses `MSG_DONTWAIT` so it never blocks the scheduler.
 
 ### Watchdog
 

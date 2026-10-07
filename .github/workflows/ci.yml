@@ -10,6 +10,19 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: shellcheck (integration scripts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # SC1091: the scripts source lib.sh through a computed path, which
+      # shellcheck cannot follow without -x.
+      - name: Lint test scripts
+        run: shellcheck -e SC1091 tests/integration/*.sh
+
   build-fetchcontent:
     name: build-fetchcontent (kernel via FetchContent, with network)
     runs-on: ubuntu-latest

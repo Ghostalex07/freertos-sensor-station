@@ -20,6 +20,9 @@ typedef struct
     SensorId_t xId;
     int iValue;
     unsigned long ulSequence;
+    /* Tick (xTaskGetTickCount) at which the reading was created; the
+     * monitor turns it into the end-to-end age (max_age_ms). */
+    unsigned long ulBornTick;
 } SensorReading_t;
 
 typedef struct
@@ -62,6 +65,8 @@ typedef struct
     unsigned long ulAlarms;
     unsigned long ulDropped;
     unsigned long ulSpikes;
+    unsigned long ulIsrEvents;
+    unsigned long ulMaxAgeMs;
     unsigned long ulLogDrops;
     unsigned long ulWatchdogFails;
     BaseType_t xAlarmActive;

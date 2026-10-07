@@ -35,6 +35,8 @@ SemaphoreHandle_t xStateMutex;
 SemaphoreHandle_t xDropSemaphore;
 SemaphoreHandle_t xInvBinary;
 SemaphoreHandle_t xInvMutex;
+SemaphoreHandle_t xDeadlockA;
+SemaphoreHandle_t xDeadlockB;
 EventGroupHandle_t xInvEvents;
 StreamBufferHandle_t xReadingStream;
 MessageBufferHandle_t xEventMessage;
@@ -49,6 +51,7 @@ volatile BaseType_t xDashboardEnabled = pdFALSE;
 volatile BaseType_t xMonitorHangDemo = pdFALSE;
 volatile BaseType_t xHttpEnabled = pdFALSE;
 volatile BaseType_t xSlowConsumer = pdFALSE;
+volatile BaseType_t xIsrDemoEnabled = pdFALSE;
 BaseType_t xStdinIsTty = pdFALSE;
 BaseType_t xStdoutIsTty = pdFALSE;
 
@@ -303,6 +306,7 @@ BaseType_t xQueueForcedReading( const SensorConfig_t * pxConfig,
     xReading.xId = pxConfig->xId;
     xReading.iValue = pxConfig->iAlarmThreshold + FORCED_OVERSHOOT + ( int ) ( rand_r( puiSeed ) % FORCED_JITTER );
     xReading.ulSequence = 0;
+    xReading.ulBornTick = ( unsigned long ) xTaskGetTickCount();
 
     return xQueueSend( xSensorQueue, &xReading, 0 );
 }
@@ -340,6 +344,8 @@ static void vSensorTask( void * pvParameters )
         xReading.xId = pxConfig->xId;
         xReading.iValue = iRandomRange( pxConfig->iMin, pxConfig->iMax, &uiSeed );
         xReading.ulSequence = ++xSystemState.ulReadings;
+        /* Birth tick: the monitor turns it into the end-to-end age. */
+        xReading.ulBornTick = ( unsigned long ) xTaskGetTickCount();
         xSemaphoreGive( xStateMutex );
 
         if( xQueueSend( xSensorQueue, &xReading, 0 ) != pdPASS )
@@ -377,6 +383,7 @@ static void vMonitorTask( void * pvParameters )
     ReadingRecord_t xRecord;
     const SensorConfig_t * pxConfig;
     BaseType_t xIsAlarm;
+    unsigned long ulAgeMs;
 
     ( void ) pvParameters;
 
@@ -398,7 +405,18 @@ static void vMonitorTask( void * pvParameters )
             pxConfig = pxGetSensorConfig( xReading.xId );
             xIsAlarm = ( iIsAlarmValue( xReading.iValue, pxConfig->iAlarmThreshold ) != 0 ) ? pdTRUE : pdFALSE;
 
+            /* End-to-end age: born when the producer created the reading,
+             * consumed here; the max value is the worst-case latency. */
+            ulAgeMs = ( ( unsigned long ) ( xTaskGetTickCount() -
+                                            ( TickType_t ) xReading.ulBornTick ) * 1000UL ) /
+                      ( unsigned long ) configTICK_RATE_HZ;
+
             xSemaphoreTake( xStateMutex, portMAX_DELAY );
+
+            if( ulAgeMs > xSystemState.ulMaxAgeMs )
+            {
+                xSystemState.ulMaxAgeMs = ulAgeMs;
+            }
 
             if( xReading.xId == SENSOR_TEMPERATURE )
             {
@@ -671,6 +689,8 @@ static void vStatsTask( void * pvParameters )
     unsigned long ulAlarms;
     unsigned long ulDropped;
     unsigned long ulSpikes;
+    unsigned long ulIsrEvents;
+    unsigned long ulMaxAgeMs;
     unsigned long ulBusy;
     unsigned long ulLogDrops;
     unsigned long ulWdFails;
@@ -711,6 +731,8 @@ static void vStatsTask( void * pvParameters )
             ulAlarms = xSystemState.ulAlarms;
             ulDropped = xSystemState.ulDropped;
             ulSpikes = xSystemState.ulSpikes;
+            ulIsrEvents = xSystemState.ulIsrEvents;
+            ulMaxAgeMs = xSystemState.ulMaxAgeMs;
             ulLogDrops = xSystemState.ulLogDrops;
             ulWdFails = xSystemState.ulWatchdogFails;
             xWdActive = xSystemState.xWatchdogActive;
@@ -718,11 +740,13 @@ static void vStatsTask( void * pvParameters )
 
             xBits = xEventGroupGetBits( xEventGroup );
 
-            vPrintFormat( "stats: readings=%lu alarms=%lu dropped=%lu spikes=%lu queue=%u/%u heap_free=%zu B tasks=%u events=%s",
+            vPrintFormat( "stats: readings=%lu alarms=%lu dropped=%lu spikes=%lu isr_events=%lu max_age_ms=%lu queue=%u/%u heap_free=%zu B tasks=%u events=%s",
                           ulReadings,
                           ulAlarms,
                           ulDropped,
                           ulSpikes,
+                          ulIsrEvents,
+                          ulMaxAgeMs,
                           ( unsigned int ) uxQueueMessagesWaiting( xSensorQueue ),
                           ( unsigned int ) SENSOR_QUEUE_LENGTH,
                           xPortGetFreeHeapSize(),
@@ -760,6 +784,40 @@ static void vSpikeTimerCallback( TimerHandle_t xTimer )
     {
         ( void ) xSemaphoreGive( xDropSemaphore );
     }
+}
+
+/* Demo 'f': vApplicationTickHook runs in ISR context (the tick interrupt).
+ * Everything here must use the FromISR API family: no blocking calls and
+ * portYIELD_FROM_ISR to request a switch if a higher priority task was
+ * unblocked by the send. One fake reading per second while enabled. */
+void vApplicationTickHook( void )
+{
+    static unsigned long ulTickPhase = 0;
+    SensorReading_t xReading;
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    ulTickPhase++;
+
+    if( ( xIsrDemoEnabled == pdFALSE ) ||
+        ( ( ulTickPhase % ISR_DEMO_PERIOD_TICKS ) != 0UL ) )
+    {
+        return;
+    }
+
+    xReading.xId = SENSOR_TEMPERATURE;
+    xReading.iValue = ISR_EVENT_VALUE;
+    xReading.ulSequence = 0;
+    xReading.ulBornTick = ( unsigned long ) xTaskGetTickCount();
+
+    if( xQueueSendFromISR( xSensorQueue, &xReading,
+                           &xHigherPriorityTaskWoken ) == pdPASS )
+    {
+        /* ISR side cannot take the state mutex: atomic increment, like
+         * the timer callback does with the spike counter. */
+        ( void ) __atomic_add_fetch( &xSystemState.ulIsrEvents, 1U, __ATOMIC_RELAXED );
+    }
+
+    portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
 }
 
 void vApplicationStackOverflowHook( TaskHandle_t xTask,
@@ -831,6 +889,9 @@ int main( void )
     xDropSemaphore = xSemaphoreCreateCounting( DROP_COUNT_MAX, 0 );
     xInvBinary = xSemaphoreCreateBinary();
     xInvMutex = xSemaphoreCreateMutex();
+    /* Demo 'y': AB/BA pair, only those two tasks ever touch them. */
+    xDeadlockA = xSemaphoreCreateMutex();
+    xDeadlockB = xSemaphoreCreateMutex();
     /* The binary semaphore starts empty: we make it available so the LOW
      * task can take it in the priority inversion demo. */
     configASSERT( xSemaphoreGive( xInvBinary ) == pdPASS );
@@ -844,7 +905,8 @@ int main( void )
                   ( xHumLatestQueue != NULL ) && ( xPrintMutex != NULL ) &&
                   ( xStateMutex != NULL ) && ( xAlarmSemaphore != NULL ) &&
                   ( xDropSemaphore != NULL ) && ( xInvBinary != NULL ) &&
-                  ( xInvMutex != NULL ) && ( xEventGroup != NULL ) &&
+                  ( xInvMutex != NULL ) && ( xDeadlockA != NULL ) &&
+                  ( xDeadlockB != NULL ) && ( xEventGroup != NULL ) &&
                   ( xSyncGroup != NULL ) && ( xInvEvents != NULL ) &&
                   ( xReadingStream != NULL ) && ( xEventMessage != NULL ) );
 

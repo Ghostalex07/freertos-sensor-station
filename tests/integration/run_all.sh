@@ -66,7 +66,7 @@ for t in "${TESTS[@]}"; do
 
         wd="$(grep -o '# workdir: .*' "$out" 2>/dev/null | head -n 1 | sed 's/^# workdir: //')"
         if [ -n "$wd" ] && [ -d "$wd" ]; then
-            rm -rf -- "$IT_LOGS/$t"
+            rm -rf -- "${IT_LOGS:?}/$t"
             cp -r -- "$wd" "$IT_LOGS/$t"
             printf '# workdir copied to %s\n' "$IT_LOGS/$t"
         fi

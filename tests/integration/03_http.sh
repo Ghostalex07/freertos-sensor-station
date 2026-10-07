@@ -20,8 +20,9 @@ except Exception as exc:  # noqa: BLE001 - retried: body may be truncated
 
 expected = {
     "uptime_s", "state", "alarms", "readings", "dropped", "spikes",
-    "log_dropped", "queue", "heap_free", "watchdog", "watchdog_fails",
-    "cpu_busy_pct", "cpu_pct", "temp", "hum", "last_event",
+    "isr_events", "max_age_ms", "log_dropped", "queue", "heap_free",
+    "watchdog", "watchdog_fails", "cpu_busy_pct", "cpu_pct", "temp",
+    "hum", "last_event",
 }
 keys = set(doc)
 if keys != expected:
@@ -42,7 +43,8 @@ if doc["watchdog"] not in ("ok", "alert"):
     sys.exit(1)
 
 for key in ("uptime_s", "alarms", "readings", "dropped", "spikes",
-            "log_dropped", "queue", "watchdog_fails"):
+            "isr_events", "max_age_ms", "log_dropped", "queue",
+            "watchdog_fails"):
     val = doc[key]
     if isinstance(val, bool) or not isinstance(val, int) or val < 0:
         print("invalid %s: %r" % (key, val))

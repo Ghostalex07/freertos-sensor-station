@@ -50,6 +50,23 @@
 #define INV_WORK_ITERS         5000
 #define INV_MED_MS             1000
 
+/* Demo 'f' (ISR simulation): one fake sensor event out of every
+ * ISR_DEMO_PERIOD_TICKS ticks (1 s at 100 Hz) while the demo flag is set. */
+#define ISR_DEMO_PERIOD_TICKS  100
+/* Value carried by the fake reading pushed from the tick hook: inside
+ * the sensor range, so it never triggers an alarm. */
+#define ISR_EVENT_VALUE        24
+
+/* Demo 'y' (recoverable AB/BA deadlock): the dl tasks hold the first
+ * mutex for DEADLOCK_LOCK_TICKS and then take the second one with a
+ * bounded wait of DEADLOCK_TIMEOUT_MS. The timeout is the escape hatch
+ * that breaks the circular wait (1000 ms keeps the demo short: a
+ * literal 1000-tick wait would last 10 s at configTICK_RATE_HZ = 100). */
+#define DEADLOCK_LOCK_TICKS    50
+#define DEADLOCK_LOCK2_TICKS   150
+#define DEADLOCK_TIMEOUT_MS    1000
+#define DEADLOCK_STACK_WORDS   1024
+
 #define SYNC_TEMP_BIT          ( 1 << 0 )
 #define SYNC_HUM_BIT           ( 1 << 1 )
 

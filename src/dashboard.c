@@ -14,7 +14,8 @@
 
 static const char * pcHelpDashboard =
     "[t] alarm  [p] pause  [c] resume  [r] reset  [d] lines  [w] watchdog\n"
-    "      [i] inversion  [v] priority  [k] backpressure  [s] tasks  [q] exit";
+    "      [i] inversion  [v] priority  [k] backpressure  [f] isr  [y] deadlock\n"
+    "      [s] tasks  [q] exit";
 
 void vDashboardDraw( void )
 {
@@ -105,6 +106,8 @@ void vDashboardDraw( void )
 
     printf( "\n  readings %lu     dropped %lu     spikes %lu\n",
             xSnapshot.ulReadings, xSnapshot.ulDropped, xSnapshot.ulSpikes );
+    printf( "  isr_events %lu     max_age_ms %lu\n",
+            xSnapshot.ulIsrEvents, xSnapshot.ulMaxAgeMs );
 
     vFormatBar( pcBar, sizeof( pcBar ), uiQueuePercent, 16 );
     printf( "  queue [%s] %lu/%u", pcBar, ulQueueCount, ( unsigned int ) SENSOR_QUEUE_LENGTH );

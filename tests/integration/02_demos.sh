@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 02_demos.sh — watchdog demo (w), priority inversion (i) and
-# priorities with vTaskPrioritySet (v). The demos are still active at
-# exit. ~10 s.
+# 02_demos.sh — watchdog demo (w), priority inversion (i), priorities
+# with vTaskPrioritySet (v), ISR simulation (f) and recoverable AB/BA
+# deadlock (y). The demos are still active at exit. ~25 s.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 resolve_bin "${1:-}"
-begin 8
+begin 13
 new_case
 start_bin
 
@@ -65,7 +65,49 @@ else
         "$(grep -a 'inversion:' out.log 2>/dev/null | tail -n 5)"
 fi
 
-# 7) v -> monitor priority lowered with vTaskPrioritySet
+# 7) f -> ISR simulation enabled from the tick hook
+send_key 'f'
+if wait_for 'isr: demo enabled' out.log 3; then
+    ok "key f enables the ISR demo"
+else
+    fail "key f enables the ISR demo" "$(tail -n 10 out.log 2>/dev/null)"
+fi
+
+# 8) the tick hook injects events (stats shows isr_events > 0)
+if wait_for 'isr_events=[1-9]' out.log 8; then
+    ok "the tick hook injects ISR events (isr_events > 0)"
+else
+    fail "the tick hook injects ISR events (isr_events > 0)" \
+        "$(grep -a 'stats:' out.log 2>/dev/null | tail -n 3)"
+fi
+
+# 9) f -> ISR simulation disabled again
+send_key 'f'
+if wait_for 'isr: demo disabled' out.log 3; then
+    ok "key f disables the ISR demo"
+else
+    fail "key f disables the ISR demo" "$(tail -n 10 out.log 2>/dev/null)"
+fi
+
+# 10) y -> recoverable AB/BA deadlock demo
+send_key 'y'
+if wait_for 'deadlock: demo started' out.log 3; then
+    ok "key y starts the deadlock demo"
+else
+    fail "key y starts the deadlock demo" "$(tail -n 10 out.log 2>/dev/null)"
+fi
+
+# 11) dl1 times out (breaks the cycle) and dl2 gets both locks
+if wait_for 'deadlock: dl1' out.log 6 &&
+    wait_for 'deadlock: dl2' out.log 6 &&
+    LC_ALL=C grep -aq 'deadlock: dl1 timed out' out.log; then
+    ok "the deadlock is broken by the take timeout (dl1 recovers)"
+else
+    fail "the deadlock is broken by the take timeout (dl1 recovers)" \
+        "$(grep -a 'deadlock:' out.log 2>/dev/null | tail -n 5)"
+fi
+
+# 12) v -> monitor priority lowered with vTaskPrioritySet
 send_key 'v'
 if wait_for 'priorities: monitor lowered from' out.log 3; then
     ok "key v lowers the monitor priority with vTaskPrioritySet"
@@ -74,7 +116,7 @@ else
         "$(tail -n 10 out.log 2>/dev/null)"
 fi
 
-# 8) q -> rc=0 with the demos still active (proves nothing hangs)
+# 13) q -> rc=0 with the demos still active (proves nothing hangs)
 send_key 'q'
 sal=0
 wait_for 'exiting' out.log 5 && sal=1

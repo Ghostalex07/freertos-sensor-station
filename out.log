@@ -1,0 +1,113 @@
+=== Sensor station FreeRTOS (POSIX port) ===
+keys: [t]=temp alarm [h]=hum alarm [p]=pause [c]=continue [r]=reset [d]=dashboard
+      [w]=watchdog [i]=inversion [v]=priority [k]=backpressure [f]=isr [y]=deadlock [s]=tasks [q]=exit [?]=help
+
+[   0 s] temperature #1 = 20 C
+[   0 s] humidity   #2 = 48 %
+[   0 s] logger: CSV active (readings.csv and events.csv)
+[   0 s] http: JSON server on http://127.0.0.1:8080 (curl to see it)
+[   0 s] aggreg: pair ready temp=20 hum=48 (queue set + peek + receive)
+[   0 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   0 s] temperature #3 = 28 C
+[   1 s] humidity   #4 = 68 %
+[   1 s] aggreg: pair ready temp=28 hum=68 (queue set + peek + receive)
+[   1 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   1 s] temperature #5 = 24 C
+[   2 s] temperature #6 = 17 C
+[   2 s] humidity   #7 = 57 %
+[   2 s] aggreg: pair ready temp=17 hum=57 (queue set + peek + receive)
+[   2 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   2 s] temperature #8 = 36 C
+[   3 s] humidity   #9 = 67 %
+[   3 s] aggreg: pair ready temp=36 hum=67 (queue set + peek + receive)
+[   3 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   3 s] temperature #10 = 34 C
+[   4 s] temperature #11 = 32 C
+[   4 s] humidity   #12 = 56 %
+[   4 s] aggreg: pair ready temp=32 hum=56 (queue set + peek + receive)
+[   4 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   4 s] temperature #13 = 23 C
+[   5 s] stats: readings=13 alarms=0 dropped=0 spikes=0 isr_events=0 max_age_ms=0 queue=0/8 heap_free=303616 B tasks=16 events=normal
+[   5 s] cpu: system busy 17.0%
+[   5 s] watchdog: ok  fails=0  log_dropped=0
+[   5 s] stack min free (words): monitor=2043 alarm=2043 stats=2043
+[   5 s] humidity   #14 = 57 %
+[   5 s] aggreg: pair ready temp=23 hum=57 (queue set + peek + receive)
+[   5 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   5 s] temperature #15 = 22 C
+[   6 s] temperature #16 = 28 C
+[   6 s] humidity   #17 = 53 %
+[   6 s] aggreg: pair ready temp=28 hum=53 (queue set + peek + receive)
+[   6 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   6 s] isr: demo enabled (1 event/s from vApplicationTickHook via xQueueSendFromISR)
+[   7 s] temperature #0 = 24 C
+[   7 s] temperature #18 = 30 C
+[   7 s] humidity   #19 = 79 %
+[   7 s] temperature #20 = 26 C
+[   7 s] aggreg: pair ready temp=30 hum=79 (queue set + peek + receive)
+[   7 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   8 s] temperature #0 = 24 C
+[   8 s] temperature #21 = 26 C
+[   8 s] humidity   #22 = 54 %
+[   8 s] aggreg: pair ready temp=26 hum=54 (queue set + peek + receive)
+[   8 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[   9 s] temperature #0 = 24 C
+[   9 s] temperature #23 = 29 C
+[   9 s] temperature #24 = 37 C
+[   9 s] humidity   #25 = 75 %
+[   9 s] aggreg: pair ready temp=37 hum=75 (queue set + peek + receive)
+[   9 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  10 s] temperature #0 = 24 C
+[  10 s] temperature #0 = 53 C  <-- ALARM
+[  10 s] !! ALARM active: threshold exceeded (total alarms: 1) !!
+[  10 s] stats: readings=25 alarms=1 dropped=0 spikes=1 isr_events=4 max_age_ms=0 queue=0/8 heap_free=303616 B tasks=16 events=ALARM
+[  10 s] cpu: system busy 16.9%
+[  10 s] watchdog: ok  fails=0  log_dropped=0
+[  10 s] stack min free (words): monitor=2043 alarm=2043 stats=2043
+[  10 s] temperature #26 = 24 C
+[  11 s] temperature #0 = 24 C
+[  11 s] humidity   #27 = 39 %
+[  11 s] aggreg: pair ready temp=24 hum=39 (queue set + peek + receive)
+[  11 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  11 s] temperature #28 = 26 C
+[  11 s] temperature #29 = 33 C
+[  12 s] temperature #0 = 24 C
+[  12 s] humidity   #30 = 35 %
+[  12 s] aggreg: pair ready temp=33 hum=35 (queue set + peek + receive)
+[  12 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  12 s] temperature #31 = 38 C
+[  12 s] deadlock: demo started (AB/BA, the second take has a 1000 ms timeout)
+[  13 s] temperature #0 = 24 C
+[  13 s] humidity   #32 = 61 %
+[  13 s] aggreg: pair ready temp=38 hum=61 (queue set + peek + receive)
+[  13 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  13 s] temperature #33 = 32 C
+[  14 s] temperature #0 = 24 C
+[  14 s] deadlock: dl1 timed out after 1000 ms waiting for the second lock (recovered)
+[  14 s] deadlock: dl2 acquired both locks after the other task released
+[  14 s] temperature #34 = 26 C
+[  14 s] humidity   #35 = 77 %
+[  14 s] aggreg: pair ready temp=26 hum=77 (queue set + peek + receive)
+[  14 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  14 s] temperature #36 = 36 C
+[  15 s] temperature #0 = 24 C
+[  15 s] stats: readings=36 alarms=1 dropped=0 spikes=1 isr_events=9 max_age_ms=0 queue=0/8 heap_free=303616 B tasks=16 events=normal
+[  15 s] cpu: system busy 17.0%
+[  15 s] watchdog: ok  fails=0  log_dropped=0
+[  15 s] stack min free (words): monitor=2043 alarm=2043 stats=2043
+[  15 s] humidity   #37 = 47 %
+[  15 s] temperature #38 = 34 C
+[  15 s] aggreg: pair ready temp=36 hum=47 (queue set + peek + receive)
+[  15 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  16 s] temperature #0 = 24 C
+[  16 s] temperature #39 = 24 C
+[  16 s] humidity   #40 = 31 %
+[  16 s] aggreg: pair ready temp=24 hum=31 (queue set + peek + receive)
+[  16 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  16 s] temperature #41 = 17 C
+[  16 s] isr: demo disabled (1 event/s from vApplicationTickHook via xQueueSendFromISR)
+[  17 s] temperature #42 = 18 C
+[  17 s] humidity   #43 = 53 %
+[  17 s] aggreg: pair ready temp=18 hum=53 (queue set + peek + receive)
+[  17 s] sync: temp and hum readings coordinated (event group, 2 bits)
+[  17 s] exiting...

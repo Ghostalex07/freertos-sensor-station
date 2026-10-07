@@ -29,7 +29,7 @@ if [ -f tasks.txt ]; then
     lines="$(wc -l < tasks.txt | tr -d ' ')"
     missing=""
     for name in temp hum monitor alarm stats command logger http; do
-        LC_ALL=C grep -qE "^[[:space:]]*$name[[:space:]]" tasks.txt ||
+        LC_ALL=C grep -qE "^[[:space:]]*${name}[[:space:]]" tasks.txt ||
             missing="$missing $name"
     done
     if [ "$lines" -ge 10 ] && [ -z "$missing" ]; then

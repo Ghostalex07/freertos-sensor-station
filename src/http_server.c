@@ -134,6 +134,7 @@ static void vHttpHandleClient( int iClient )
         iBodyLength = snprintf( pcBody, sizeof( pcBody ),
                                 "{\"uptime_s\":%lu,\"state\":\"%s\",\"alarms\":%lu,"
                                 "\"readings\":%lu,\"dropped\":%lu,\"spikes\":%lu,"
+                                "\"isr_events\":%lu,\"max_age_ms\":%lu,"
                                 "\"log_dropped\":%lu,\"queue\":%u,\"heap_free\":%u,"
                                 "\"watchdog\":\"%s\",\"watchdog_fails\":%lu,"
                                 "\"cpu_busy_pct\":%lu.%lu,"
@@ -147,6 +148,8 @@ static void vHttpHandleClient( int iClient )
                                 xSnapshot.ulReadings,
                                 xSnapshot.ulDropped,
                                 xSnapshot.ulSpikes,
+                                xSnapshot.ulIsrEvents,
+                                xSnapshot.ulMaxAgeMs,
                                 xSnapshot.ulLogDrops,
                                 ( unsigned int ) uxQueueMessagesWaiting( xSensorQueue ),
                                 ( unsigned int ) xPortGetFreeHeapSize(),
@@ -189,6 +192,7 @@ static void vHttpHandleClient( int iClient )
                                 "<tr><th>cpu system</th><td>%lu.%lu%%</td>"
                                 "<th>cpu monitor</th><td>%lu.%lu%%</td></tr>\n"
                                 "<tr><th>spikes</th><td>%lu</td><th>log_dropped</th><td>%lu</td></tr>\n"
+                                "<tr><th>ISR events</th><td>%lu</td><th>max age</th><td>%lu ms</td></tr>\n"
                                 "</table>\n"
                                 "<p>last event: %s</p>\n"
                                 "<p>JSON: <a href=\"/metrics\">/metrics</a> &middot; "
@@ -213,6 +217,8 @@ static void vHttpHandleClient( int iClient )
                                 xSnapshot.ulCpuMonitorX10 % 10UL,
                                 xSnapshot.ulSpikes,
                                 xSnapshot.ulLogDrops,
+                                xSnapshot.ulIsrEvents,
+                                xSnapshot.ulMaxAgeMs,
                                 pcEvent );
         pcContentType = "text/html; charset=utf-8";
     }

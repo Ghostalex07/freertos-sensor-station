@@ -8,8 +8,6 @@
 #   finish       -> summary; exit 1 if there were failures and keeps the WORKDIR
 #   github_error -> prints ::error:: (GitHub Actions annotation)
 
-IT_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-
 BIN="${BIN:-}"
 WORKDIR=""
 PID=""
