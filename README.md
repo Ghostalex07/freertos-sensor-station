@@ -24,7 +24,7 @@ Educational **FreeRTOS** demo that simulates a temperature and humidity sensor s
 - 🖼️ **HTML page** at `http://127.0.0.1:8080/` (besides the JSON `/metrics`, now with **CPU % per task**).
 - 📜 **CSV rotation**: `readings.csv` rotates to `readings.1.csv` past 64 KiB.
 - 🧪 **Unit tests**: pure functions in `src/logic.c` tested with `ctest` (`tests/test_logic.c`).
-- ⚙️ **Static allocation**: the `logger` task uses `xTaskCreateStatic` with its own TCB and stack (no `pvPortMalloc`).
+- ⚙️ **Static allocation**: the `logger` task always uses `xTaskCreateStatic`, and the optional build flag `-DSENSOR_STATION_STATIC=ON` creates **every** object and task statically (zero `pvPortMalloc`).
 - 🎲 **Reproducible seed**: `SENSOR_STATION_SEED=42 ./build/sensor_station` produces deterministic readings (useful in CI).
 - 🔧 **Centralized configuration** in `FreeRTOSConfig.h` and in the header of `src/main.c`.
 - 🏗️ **CMake build**: downloads the kernel with `FetchContent` or uses a local one with `-DFREERTOS_KERNEL_PATH`.
@@ -60,6 +60,16 @@ cmake -S . -B build -DFREERTOS_KERNEL_PATH=/path/to/FreeRTOS-Kernel
 cmake --build build -j
 ./build/sensor_station
 ```
+
+### Fully static variant (no `pvPortMalloc` at all)
+
+```bash
+cmake -S . -B build -DSENSOR_STATION_STATIC=ON
+cmake --build build -j
+./build/sensor_station
+```
+
+With `-DSENSOR_STATION_STATIC=ON` **every** queue, semaphore, event group, stream/message buffer, timer and task is created with its `*Static` API (user-supplied TCB, stack and storage), so the application never calls `pvPortMalloc` — `heap_free` in `/metrics` stays constant at `configTOTAL_HEAP_SIZE` for the whole run. The default build only allocates the `logger` task statically.
 
 The executable is produced as `sensor_station` inside `build/`.
 
@@ -151,7 +161,7 @@ Press the keys while the application is running. If stdout is a **terminal**, th
 | **Counting semaphore** | `xSemaphoreCreateCounting` | Counts the dropped readings when the queue is full; `stats` consumes them. |
 | **Task notification** | `xTaskNotifyGive`, `xTaskNotifyWait` | Wakes the `stats` task instantly to redraw the dashboard. |
 | **Software timer** | `xTimerCreate` | Every 10 s it injects a temperature spike that triggers an alarm. |
-| **Task management** | `xTaskCreate`, `xTaskCreateStatic`, `xSensorsPaused` flag | Creates the 15 tasks (one of them statically allocated); `p`/`c` pause the sensors with a flag (no task is blocked). |
+| **Task management** | `xTaskCreate`, `xTaskCreateStatic`, `xSensorsPaused` flag | Creates the 15 tasks (`logger` always static, all of them static with `-DSENSOR_STATION_STATIC=ON`); `p`/`c` pause the sensors with a flag (no task is blocked). |
 | **Periodicity** | `vTaskDelayUntil` | The sensors run every 700 ms / 1100 ms without drift. |
 | **Diagnostics** | `xPortGetFreeHeapSize`, `uxTaskGetStackHighWaterMark`, `uxTaskGetSystemState` | The `stats` task reports heap, minimum stack and CPU % per task (*run-time stats*). |
 | **Stream buffer** | `xStreamBufferCreate`, `xStreamBufferSend`, `xStreamBufferReceive` | Binary sensor→logger readings; the monitor sends every sample and `logger` dumps `readings.csv`. |
@@ -163,7 +173,7 @@ Press the keys while the application is running. If stdout is a **terminal**, th
 | **Priority inversion** | binary semaphore vs `xSemaphoreCreateMutex` | Demo `i`: the LOW task holds the resource while the HIGH task waits; the mutex applies inheritance and cuts the wait from ~1 s to <10 ms. |
 | **`vTaskPrioritySet`** | `vTaskPrioritySet` | Demo `v`: lowers and restores the `monitor` priority on the fly. |
 | **Backpressure** | blocking consumer + `xSemaphoreGive` (counting) | Demo `k`: with the queue full, the drops grow and are counted in `dropped`. |
-| **Static allocation** | `xTaskCreateStatic` | The `logger` task uses a static TCB and stack (no `pvPortMalloc`). |
+| **Static allocation** | `xTaskCreateStatic`, `xQueueCreateStatic`, … | The `logger` task always uses a static TCB/stack; with `-DSENSOR_STATION_STATIC=ON` **all** objects and tasks are static (zero `pvPortMalloc`). |
 | **`vTaskList`** | `vTaskList` (trace facility) | Demo `s`: dumps name/state/priority/stack of every task to `tasks.txt`. |
 | **ISR context** | `vApplicationTickHook`, `xQueueSendFromISR`, `portYIELD_FROM_ISR` | Demo `f`: the tick interrupt injects a fake reading every second; in ISR context only the FromISR API family is legal. |
 | **Bounded wait** | `xSemaphoreTake` with timeout | Demo `y`: the AB/BA circular wait is broken by the 1000 ms timeout on the second take (the escape hatch from deadlock). |
@@ -232,6 +242,17 @@ Everything tunable lives in two places:
 
 ---
 
+## Tests
+
+Two layers, both wired into CI:
+
+- **Unit (`ctest`)**: pure functions in `src/logic.c` (`tests/test_logic.c`).
+- **Integration (TAP, bash)**: `tests/integration/run_all.sh [path/to/sensor_station]` runs six sequential tests against a live instance: keys/help, demos (ISR, deadlock, inversion…), HTTP (`/metrics`, `/events`), CSV/tasks, signals and PTY. Sequential because the HTTP port 8080 is fixed. Deterministic with `SENSOR_STATION_SEED=42`.
+
+CI (`.github/workflows/ci.yml`) has five jobs: `shellcheck` (lint of the test scripts), `build-fetchcontent`, `build-kernel-local`, `build-static` (all objects/tasks static) and `build-asan` (ASan + UBSan); each build job runs `ctest` and the full integration suite.
+
+---
+
 ## Proposed exercises
 
 Ordered from easy to hard:
@@ -252,7 +273,7 @@ Ordered from easy to hard:
 
 ```
 freertos-sensor-station/
-├── .github/workflows/ci.yml  # CI: local build + FetchContent + ASan, ctest and smoke test
+├── .github/workflows/ci.yml  # CI: shellcheck + FetchContent + local + static + ASan (ctest + TAP suite)
 ├── CMakeLists.txt        # Build: FetchContent of the kernel or local path + logic_tests
 ├── FreeRTOSConfig.h      # FreeRTOS configuration (heap, stack, tick, queue sets…)
 ├── LICENSE               # MIT
@@ -270,6 +291,7 @@ freertos-sensor-station/
 │   ├── dashboard.c / dashboard.h  # ANSI dashboard rendering (bars, sparklines, CPU per task)
 │   └── demos.c / demos.h     # Keyboard (vCommandTask) and demos: inversion, priorities, watchdog, backpressure
 ├── tests/test_logic.c    # Unit tests (ctest)
+├── tests/integration/    # TAP integration suite: run_all.sh + 01..06
 ├── tools/plot_csv.py     # SVG chart of readings.csv with no dependencies
 └── docs/
     ├── demo.gif          # Recording of the running dashboard

@@ -79,6 +79,63 @@ static TaskHandle_t xInvHighTaskHandle;
 
 static unsigned int uiBaseSeed = 0;
 
+#if SENSOR_STATION_STATIC
+/* Static storage for the SENSOR_STATION_STATIC build (option of the same
+ * name in CMakeLists.txt): every object and task below is created with
+ * its *Static API, so the application never calls pvPortMalloc. */
+static StaticQueue_t xSensorQueueBuffer;
+static uint8_t ucSensorQueueStorage[ SENSOR_QUEUE_LENGTH * sizeof( SensorReading_t ) ];
+static StaticQueue_t xTempLatestBuffer;
+static uint8_t ucTempLatestStorage[ sizeof( SensorReading_t ) ];
+static StaticQueue_t xHumLatestBuffer;
+static uint8_t ucHumLatestStorage[ sizeof( SensorReading_t ) ];
+static StaticQueue_t xAggSetBuffer;
+static uint8_t ucAggSetStorage[ 2 * sizeof( void * ) ];
+static StaticSemaphore_t xPrintMutexBuffer;
+static StaticSemaphore_t xStateMutexBuffer;
+static StaticSemaphore_t xAlarmSemaphoreBuffer;
+static StaticSemaphore_t xDropSemaphoreBuffer;
+static StaticSemaphore_t xInvBinaryBuffer;
+static StaticSemaphore_t xInvMutexBuffer;
+static StaticSemaphore_t xDeadlockABuffer;
+static StaticSemaphore_t xDeadlockBBuffer;
+static StaticEventGroup_t xEventGroupBuffer;
+static StaticEventGroup_t xSyncGroupBuffer;
+static StaticEventGroup_t xInvEventsBuffer;
+static StaticStreamBuffer_t xReadingStreamBuffer;
+static uint8_t ucReadingStreamStorage[ STREAM_LENGTH ];
+static StaticMessageBuffer_t xEventMessageBuffer;
+static uint8_t ucEventMessageStorage[ MESSAGE_BUFFER_LENGTH ];
+static StaticTimer_t xSpikeTimerBuffer;
+
+static StaticTask_t xTempTcb;
+static StackType_t xTempStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xHumTcb;
+static StackType_t xHumStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xMonitorTcb;
+static StackType_t xMonitorStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xAlarmTcb;
+static StackType_t xAlarmStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xStatsTcb;
+static StackType_t xStatsStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xCommandTcb;
+static StackType_t xCommandStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xWatchdogTcb;
+static StackType_t xWatchdogStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xHttpTcb;
+static StackType_t xHttpStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xAggregTcb;
+static StackType_t xAggregStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xSyncTcb;
+static StackType_t xSyncStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xInvLowTcb;
+static StackType_t xInvLowStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xInvMedTcb;
+static StackType_t xInvMedStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xInvHighTcb;
+static StackType_t xInvHighStack[ configMINIMAL_STACK_SIZE ];
+#endif /* SENSOR_STATION_STATIC */
+
 long long llEpochMs( void )
 {
     struct timespec xNow;
@@ -864,6 +921,16 @@ int main( void )
     TimerHandle_t xSpikeTimer;
     BaseType_t xResult;
 
+    /* heap_4 initialises itself only on the first pvPortMalloc(). Touch the
+     * heap once at startup so xPortGetFreeHeapSize() reports the real free
+     * bytes from the very first /metrics read (a fully static build would
+     * otherwise report heap_free: 0 for a completely untouched heap). */
+    {
+        void * pvWarmup = pvPortMalloc( 4 );
+        configASSERT( pvWarmup != NULL );
+        vPortFree( pvWarmup );
+    }
+
     vInstallSignalHandlers();
 
     xStdinIsTty = ( isatty( STDIN_FILENO ) != 0 ) ? pdTRUE : pdFALSE;
@@ -892,6 +959,33 @@ int main( void )
         printf( "%s\n\n", pcHelpText );
     }
 
+#if SENSOR_STATION_STATIC
+    xSensorQueue = xQueueCreateStatic( SENSOR_QUEUE_LENGTH, sizeof( SensorReading_t ),
+                                        ucSensorQueueStorage, &xSensorQueueBuffer );
+    xTempLatestQueue = xQueueCreateStatic( 1, sizeof( SensorReading_t ),
+                                            ucTempLatestStorage, &xTempLatestBuffer );
+    xHumLatestQueue = xQueueCreateStatic( 1, sizeof( SensorReading_t ),
+                                           ucHumLatestStorage, &xHumLatestBuffer );
+    xPrintMutex = xSemaphoreCreateMutexStatic( &xPrintMutexBuffer );
+    xStateMutex = xSemaphoreCreateMutexStatic( &xStateMutexBuffer );
+    xAlarmSemaphore = xSemaphoreCreateBinaryStatic( &xAlarmSemaphoreBuffer );
+    xDropSemaphore = xSemaphoreCreateCountingStatic( DROP_COUNT_MAX, 0, &xDropSemaphoreBuffer );
+    xInvBinary = xSemaphoreCreateBinaryStatic( &xInvBinaryBuffer );
+    xInvMutex = xSemaphoreCreateMutexStatic( &xInvMutexBuffer );
+    /* Demo 'y': AB/BA pair, only those two tasks ever touch them. */
+    xDeadlockA = xSemaphoreCreateMutexStatic( &xDeadlockABuffer );
+    xDeadlockB = xSemaphoreCreateMutexStatic( &xDeadlockBBuffer );
+    /* The binary semaphore starts empty: we make it available so the LOW
+     * task can take it in the priority inversion demo. */
+    configASSERT( xSemaphoreGive( xInvBinary ) == pdPASS );
+    xEventGroup = xEventGroupCreateStatic( &xEventGroupBuffer );
+    xSyncGroup = xEventGroupCreateStatic( &xSyncGroupBuffer );
+    xInvEvents = xEventGroupCreateStatic( &xInvEventsBuffer );
+    xReadingStream = xStreamBufferCreateStatic( STREAM_LENGTH, 1,
+                                                 ucReadingStreamStorage, &xReadingStreamBuffer );
+    xEventMessage = xMessageBufferCreateStatic( MESSAGE_BUFFER_LENGTH,
+                                                 ucEventMessageStorage, &xEventMessageBuffer );
+#else
     xSensorQueue = xQueueCreate( SENSOR_QUEUE_LENGTH, sizeof( SensorReading_t ) );
     xTempLatestQueue = xQueueCreate( 1, sizeof( SensorReading_t ) );
     xHumLatestQueue = xQueueCreate( 1, sizeof( SensorReading_t ) );
@@ -912,6 +1006,7 @@ int main( void )
     xInvEvents = xEventGroupCreate();
     xReadingStream = xStreamBufferCreate( STREAM_LENGTH, 1 );
     xEventMessage = xMessageBufferCreate( MESSAGE_BUFFER_LENGTH );
+#endif
 
     configASSERT( ( xSensorQueue != NULL ) && ( xTempLatestQueue != NULL ) &&
                   ( xHumLatestQueue != NULL ) && ( xPrintMutex != NULL ) &&
@@ -922,7 +1017,11 @@ int main( void )
                   ( xSyncGroup != NULL ) && ( xInvEvents != NULL ) &&
                   ( xReadingStream != NULL ) && ( xEventMessage != NULL ) );
 
+#if SENSOR_STATION_STATIC
+    xAggSet = xQueueCreateSetStatic( 2, ucAggSetStorage, &xAggSetBuffer );
+#else
     xAggSet = xQueueCreateSet( 2 );
+#endif
     configASSERT( xAggSet != NULL );
     configASSERT( xQueueAddToSet( xTempLatestQueue, xAggSet ) == pdPASS );
     configASSERT( xQueueAddToSet( xHumLatestQueue, xAggSet ) == pdPASS );
@@ -930,6 +1029,72 @@ int main( void )
     memset( &xSystemState, 0, sizeof( xSystemState ) );
     strcpy( xSystemState.pcLastEvent, "system started" );
 
+#if SENSOR_STATION_STATIC
+    xTempTaskHandle = xTaskCreateStatic( vSensorTask, "temp", configMINIMAL_STACK_SIZE,
+                                          ( void * ) &xTempSensor, PRIORITY_SENSOR,
+                                          xTempStack, &xTempTcb );
+    configASSERT( xTempTaskHandle != NULL );
+
+    xHumTaskHandle = xTaskCreateStatic( vSensorTask, "hum", configMINIMAL_STACK_SIZE,
+                                         ( void * ) &xHumSensor, PRIORITY_SENSOR,
+                                         xHumStack, &xHumTcb );
+    configASSERT( xHumTaskHandle != NULL );
+
+    xMonitorTaskHandle = xTaskCreateStatic( vMonitorTask, "monitor", configMINIMAL_STACK_SIZE,
+                                             NULL, PRIORITY_MONITOR,
+                                             xMonitorStack, &xMonitorTcb );
+    configASSERT( xMonitorTaskHandle != NULL );
+
+    xAlarmTaskHandle = xTaskCreateStatic( vAlarmTask, "alarm", configMINIMAL_STACK_SIZE,
+                                           NULL, PRIORITY_ALARM,
+                                           xAlarmStack, &xAlarmTcb );
+    configASSERT( xAlarmTaskHandle != NULL );
+
+    xStatsTaskHandle = xTaskCreateStatic( vStatsTask, "stats", configMINIMAL_STACK_SIZE,
+                                           NULL, PRIORITY_STATS,
+                                           xStatsStack, &xStatsTcb );
+    configASSERT( xStatsTaskHandle != NULL );
+
+    xCommandTaskHandle = xTaskCreateStatic( vCommandTask, "command", configMINIMAL_STACK_SIZE,
+                                             NULL, PRIORITY_COMMAND,
+                                             xCommandStack, &xCommandTcb );
+    configASSERT( xCommandTaskHandle != NULL );
+
+    xWatchdogTaskHandle = xTaskCreateStatic( vWatchdogTask, "watchdog", configMINIMAL_STACK_SIZE,
+                                              NULL, PRIORITY_WATCHDOG,
+                                              xWatchdogStack, &xWatchdogTcb );
+    configASSERT( xWatchdogTaskHandle != NULL );
+
+    xHttpTaskHandle = xTaskCreateStatic( vHttpTask, "http", configMINIMAL_STACK_SIZE,
+                                          NULL, PRIORITY_HTTP,
+                                          xHttpStack, &xHttpTcb );
+    configASSERT( xHttpTaskHandle != NULL );
+
+    xAggregatorTaskHandle = xTaskCreateStatic( vAggregatorTask, "aggreg", configMINIMAL_STACK_SIZE,
+                                                NULL, PRIORITY_STATS,
+                                                xAggregStack, &xAggregTcb );
+    configASSERT( xAggregatorTaskHandle != NULL );
+
+    xSyncTaskHandle = xTaskCreateStatic( vSyncTask, "sync", configMINIMAL_STACK_SIZE,
+                                          NULL, PRIORITY_STATS,
+                                          xSyncStack, &xSyncTcb );
+    configASSERT( xSyncTaskHandle != NULL );
+
+    xInvLowTaskHandle = xTaskCreateStatic( vInvLowTask, "inv-low", configMINIMAL_STACK_SIZE,
+                                            NULL, PRIORITY_STATS,
+                                            xInvLowStack, &xInvLowTcb );
+    configASSERT( xInvLowTaskHandle != NULL );
+
+    xInvMedTaskHandle = xTaskCreateStatic( vInvMedTask, "inv-med", configMINIMAL_STACK_SIZE,
+                                            NULL, PRIORITY_SENSOR,
+                                            xInvMedStack, &xInvMedTcb );
+    configASSERT( xInvMedTaskHandle != NULL );
+
+    xInvHighTaskHandle = xTaskCreateStatic( vInvHighTask, "inv-high", configMINIMAL_STACK_SIZE,
+                                             NULL, PRIORITY_MONITOR,
+                                             xInvHighStack, &xInvHighTcb );
+    configASSERT( xInvHighTaskHandle != NULL );
+#else
     xResult = xTaskCreate( vSensorTask, "temp", configMINIMAL_STACK_SIZE,
                             ( void * ) &xTempSensor, PRIORITY_SENSOR, &xTempTaskHandle );
     configASSERT( xResult == pdPASS );
@@ -953,12 +1118,6 @@ int main( void )
     xResult = xTaskCreate( vCommandTask, "command", configMINIMAL_STACK_SIZE,
                             NULL, PRIORITY_COMMAND, &xCommandTaskHandle );
     configASSERT( xResult == pdPASS );
-
-    /* Logger with static allocation (own TCB and stack, no pvPortMalloc). */
-    xLoggerTaskHandle = xTaskCreateStatic( vLoggerTask, "logger", configMINIMAL_STACK_SIZE,
-                                            NULL, PRIORITY_LOGGER,
-                                            xLoggerStack, &xLoggerTcb );
-    configASSERT( xLoggerTaskHandle != NULL );
 
     xResult = xTaskCreate( vWatchdogTask, "watchdog", configMINIMAL_STACK_SIZE,
                             NULL, PRIORITY_WATCHDOG, &xWatchdogTaskHandle );
@@ -987,9 +1146,22 @@ int main( void )
     xResult = xTaskCreate( vInvHighTask, "inv-high", configMINIMAL_STACK_SIZE,
                             NULL, PRIORITY_MONITOR, &xInvHighTaskHandle );
     configASSERT( xResult == pdPASS );
+#endif /* SENSOR_STATION_STATIC */
 
+    /* Logger with static allocation (own TCB and stack, no pvPortMalloc). */
+    xLoggerTaskHandle = xTaskCreateStatic( vLoggerTask, "logger", configMINIMAL_STACK_SIZE,
+                                            NULL, PRIORITY_LOGGER,
+                                            xLoggerStack, &xLoggerTcb );
+    configASSERT( xLoggerTaskHandle != NULL );
+
+#if SENSOR_STATION_STATIC
+    xSpikeTimer = xTimerCreateStatic( "spike", pdMS_TO_TICKS( SPIKE_PERIOD_MS ),
+                                       pdTRUE, NULL, vSpikeTimerCallback,
+                                       &xSpikeTimerBuffer );
+#else
     xSpikeTimer = xTimerCreate( "spike", pdMS_TO_TICKS( SPIKE_PERIOD_MS ),
-                                pdTRUE, NULL, vSpikeTimerCallback );
+                                 pdTRUE, NULL, vSpikeTimerCallback );
+#endif
     configASSERT( xSpikeTimer != NULL );
 
     xResult = xTimerStart( xSpikeTimer, 0 );

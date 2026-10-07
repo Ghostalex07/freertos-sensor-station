@@ -31,6 +31,17 @@ volatile TickType_t xPrioDemoDeadline = 0;
 
 static BaseType_t xStdinClosed = pdFALSE;
 
+#if SENSOR_STATION_STATIC
+/* Static TCB/stacks for the tasks the demos spawn on demand: with
+ * SENSOR_STATION_STATIC=1 even the demos never call pvPortMalloc. */
+static StaticTask_t xInvDemoTcb;
+static StackType_t xInvDemoStack[ configMINIMAL_STACK_SIZE ];
+static StaticTask_t xDl1Tcb;
+static StackType_t xDl1Stack[ DEADLOCK_STACK_WORDS ];
+static StaticTask_t xDl2Tcb;
+static StackType_t xDl2Stack[ DEADLOCK_STACK_WORDS ];
+#endif /* SENSOR_STATION_STATIC */
+
 void vInvLowTask( void * pvParameters )
 {
     SemaphoreHandle_t xLock;
@@ -314,13 +325,27 @@ void vCommandTask( void * pvParameters )
 
                             iDeadlockRemaining = 2;
                             xDeadlockDemoRunning = pdTRUE;
+#if SENSOR_STATION_STATIC
+                            xDl1 = xTaskCreateStatic( vDeadlockDl1, "dl1",
+                                                      DEADLOCK_STACK_WORDS, NULL,
+                                                      PRIORITY_ALARM, xDl1Stack, &xDl1Tcb );
+                            xCreated = ( xDl1 != NULL ) ? pdPASS : pdFAIL;
+#else
                             xCreated = xTaskCreate( vDeadlockDl1, "dl1", DEADLOCK_STACK_WORDS,
                                                     NULL, PRIORITY_ALARM, &xDl1 );
+#endif
 
                             if( xCreated == pdPASS )
                             {
+#if SENSOR_STATION_STATIC
+                                xDl2 = xTaskCreateStatic( vDeadlockDl2, "dl2",
+                                                          DEADLOCK_STACK_WORDS, NULL,
+                                                          PRIORITY_ALARM, xDl2Stack, &xDl2Tcb );
+                                xCreated = ( xDl2 != NULL ) ? pdPASS : pdFAIL;
+#else
                                 xCreated = xTaskCreate( vDeadlockDl2, "dl2", DEADLOCK_STACK_WORDS,
                                                         NULL, PRIORITY_ALARM, &xDl2 );
+#endif
                             }
 
                             if( xCreated == pdPASS )
@@ -368,12 +393,21 @@ void vCommandTask( void * pvParameters )
                         }
                         else
                         {
-                            TaskHandle_t xDemoHandle;
+                            TaskHandle_t xDemoHandle = NULL;
                             BaseType_t xCreated;
 
+#if SENSOR_STATION_STATIC
+                            ( void ) xDemoHandle;
+                            xCreated = ( xTaskCreateStatic( vInversionDemoTask, "invdemo",
+                                                            configMINIMAL_STACK_SIZE, NULL,
+                                                            PRIORITY_ALARM,
+                                                            xInvDemoStack, &xInvDemoTcb ) != NULL ) ?
+                                       pdPASS : pdFAIL;
+#else
                             xCreated = xTaskCreate( vInversionDemoTask, "invdemo",
                                                     configMINIMAL_STACK_SIZE, NULL,
                                                     PRIORITY_ALARM, &xDemoHandle );
+#endif
 
                             if( xCreated == pdPASS )
                             {

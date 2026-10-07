@@ -7,6 +7,12 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(FREERTOS_HEAP "4" CACHE STRING "")
 set(FREERTOS_PORT "GCC_POSIX" CACHE STRING "")
 
+# Static-everything build: every queue, semaphore, event group, buffer,
+# timer and task is created with its static API, so the application never
+# calls pvPortMalloc (heap_free stays at configTOTAL_HEAP_SIZE).
+option(SENSOR_STATION_STATIC
+       "Create every FreeRTOS object and task with static allocation" OFF)
+
 add_library(freertos_config INTERFACE)
 target_include_directories(freertos_config INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -61,6 +67,9 @@ add_executable(sensor_station
 )
 target_compile_options(sensor_station PRIVATE -Wall -Wextra)
 target_compile_definitions(sensor_station PRIVATE _DEFAULT_SOURCE)
+if(SENSOR_STATION_STATIC)
+    target_compile_definitions(sensor_station PRIVATE SENSOR_STATION_STATIC=1)
+endif()
 target_link_libraries(sensor_station freertos_kernel freertos_config Threads::Threads)
 
 enable_testing()

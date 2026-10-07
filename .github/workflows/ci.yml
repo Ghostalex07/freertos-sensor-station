@@ -154,6 +154,77 @@ jobs:
           path: ${{ runner.temp }}/it-logs/
           if-no-files-found: ignore
 
+  # Every queue, semaphore, event group, buffer, timer and task created
+  # with its static API: pvPortMalloc is never called by the application,
+  # so heap_free stays at (nearly) configTOTAL_HEAP_SIZE for the whole run.
+  build-static:
+    name: build-static (all static allocation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Checkout FreeRTOS-Kernel V11.3.1
+        uses: actions/checkout@v5
+        with:
+          repository: FreeRTOS/FreeRTOS-Kernel
+          ref: V11.3.1
+          path: kernel
+
+      - name: Toolchain versions
+        run: cmake --version && gcc --version
+
+      - name: Configure (static allocation, local kernel)
+        run: >
+          cmake -S . -B build
+          -DFREERTOS_KERNEL_PATH="${{ github.workspace }}/kernel"
+          -DSENSOR_STATION_STATIC=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Unit tests (ctest)
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test
+        env:
+          SENSOR_STATION_SEED: "42"
+        run: |
+          rc=0
+          timeout -k 1 6 ./build/sensor_station </dev/null > out.log 2>&1 || rc=$?
+          echo "exit code: $rc (124 = killed by timeout = expected)"
+          cat out.log
+          if [ "$rc" -ne 124 ] && [ "$rc" -ne 0 ]; then
+            echo "::error::sensor_station exited with an unexpected code: $rc"
+            exit 1
+          fi
+          if ! grep -q "temperature" out.log; then
+            echo "::error::'temperature' does not appear in the output"
+            exit 1
+          fi
+          if ! grep -q "stats:" out.log; then
+            echo "::error::'stats:' does not appear in the output"
+            exit 1
+          fi
+          echo "Smoke test OK"
+
+      # TAP integration suite (bash, no dependencies). Sequential: the
+      # HTTP port 8080 is fixed in C, it never runs in parallel.
+      - name: Integration tests
+        env:
+          SENSOR_STATION_SEED: "42"
+        timeout-minutes: 5
+        run: bash tests/integration/run_all.sh ./build/sensor_station
+
+      - name: Upload integration test logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: it-logs-build-static
+          path: ${{ runner.temp }}/it-logs/
+          if-no-files-found: ignore
+
   build-asan:
     name: build-asan (local kernel, ASan + UBSan)
     runs-on: ubuntu-latest
