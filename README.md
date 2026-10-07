@@ -22,10 +22,10 @@ Demo educativa de **FreeRTOS** que simula una estación de sensores de temperatu
 - 🧰 **Primitivas avanzadas con demo interactiva**: cola de colas (*queue set*) + `xQueueOverwrite`/`xQueuePeek`, sincronización temp+hum con event group, inversión de prioridades semáforo vs mutex (tecla `i`), `vTaskPrioritySet` (tecla `v`), backpressure con consumidor lento (tecla `k`) y volcado `vTaskList` (tecla `s`).
 - 🖼️ **Página HTML** en `http://127.0.0.1:8080/` (además del JSON `/metrics`, ahora con **CPU % por tarea**).
 - 📜 **Rotación de CSV**: `readings.csv` rota a `readings.1.csv` al superar 64 KiB.
-- 🧪 **Tests unitarios**: funciones puras en `logic.c` con `ctest` (`tests/test_logic.c`).
+- 🧪 **Tests unitarios**: funciones puras en `src/logic.c` con `ctest` (`tests/test_logic.c`).
 - ⚙️ **Alojamiento estático**: la tarea `logger` usa `xTaskCreateStatic` con TCB y pila propios (sin `pvPortMalloc`).
 - 🎲 **Semilla reproducible**: `SENSOR_STATION_SEED=42 ./build/sensor_station` genera lecturas deterministas (útil en CI).
-- 🔧 **Configuración centralizada** en `FreeRTOSConfig.h` y en la cabecera de `main.c`.
+- 🔧 **Configuración centralizada** en `FreeRTOSConfig.h` y en la cabecera de `src/main.c`.
 - 🏗️ **Build con CMake**: descarga el kernel con `FetchContent` o usa uno local con `-DFREERTOS_KERNEL_PATH`.
 
 ---
@@ -212,15 +212,15 @@ Todo lo ajustable está en dos sitios:
 
 | Qué | Dónde | Detalle |
 | --- | --- | --- |
-| Umbrales de alarma | `main.c` | Constantes `TEMP_ALARM_THRESHOLD` y `HUM_ALARM_THRESHOLD` al inicio del archivo. |
-| Periodo de los sensores | `main.c` | Tareas `xTempSensor` y `xHumSensor` (700 ms y 1100 ms). |
+| Umbrales de alarma | `src/main.c` | Constantes `TEMP_ALARM_THRESHOLD` y `HUM_ALARM_THRESHOLD` al inicio del archivo. |
+| Periodo de los sensores | `src/main.c` | Tareas `xTempSensor` y `xHumSensor` (700 ms y 1100 ms). |
 | Tamaño del heap | `FreeRTOSConfig.h` | `configTOTAL_HEAP_SIZE = 524288` (512 KiB). |
 | Tamaño de pila mínimo | `FreeRTOSConfig.h` | `configMINIMAL_STACK_SIZE = 2048`. |
 | Frecuencia del tick | `FreeRTOSConfig.h` | 100 Hz (10 ms por tick). |
 | Detección de desbordamiento de pila | `FreeRTOSConfig.h` | `configCHECK_FOR_STACK_OVERFLOW = 2`. ⚠️ En el puerto GCC_POSIX cada tarea corre en un pthread con pila nativa: la marca de pila de FreeRTOS es constante, la protección real la aporta el propio sistema. |
-| CPU % por tarea | `FreeRTOSConfig.h` | `configGENERATE_RUN_TIME_STATS = 1` con contador propio de 1 µs (`portALT_GET_RUN_TIME_COUNTER_VALUE`, ver `ulPortGetAltMicros()` en `main.c`). |
+| CPU % por tarea | `FreeRTOSConfig.h` | `configGENERATE_RUN_TIME_STATS = 1` con contador propio de 1 µs (`portALT_GET_RUN_TIME_COUNTER_VALUE`, ver `ulPortGetAltMicros()` en `src/main.c`). |
 
-> Los periodos de las tareas, la ventana de limpieza del event group (3 s) y el periodo del timer (10 s) también se definen en `main.c`.
+> Los periodos de las tareas, la ventana de limpieza del event group (3 s) y el periodo del timer (10 s) también se definen en `src/main.c`.
 
 ---
 
@@ -250,16 +250,17 @@ freertos-sensor-station/
 ├── LICENSE               # MIT
 ├── README.md             # Este archivo
 ├── .gitignore
-├── app_config.h          # Constantes de la app: periodos, umbrales, rutas CSV, prioridades
-├── app_types.h           # Tipos compartidos: sensores, registro CSV, estado global, ids del watchdog
-├── app_shared.h          # Costura entre módulos: globals `extern` y utilidades comunes
-├── logic.c / logic.h     # Funciones puras (sparklines, barras, umbrales) con tests
-├── main.c                # Orquestador: sensores, monitor, alarmas, stats, sync, init y main()
-├── watchdog.c / watchdog.h    # Latidos de cada tarea y revisión periódica (vWatchdogBeat)
-├── logger_csv.c / logger_csv.h # Escritura y rotación de readings.csv y events.csv
-├── http_server.c / http_server.h # Servidor HTTP: dashboard en HTML y métricas en JSON
-├── dashboard.c / dashboard.h  # Pintado ANSI del dashboard (barras, sparklines, CPU por tarea)
-├── demos.c / demos.h     # Teclado (vCommandTask) y demos: inversión, prioridades, vigía, presión
+├── src/
+│   ├── app_config.h          # Constantes de la app: periodos, umbrales, rutas CSV, prioridades
+│   ├── app_types.h           # Tipos compartidos: sensores, registro CSV, estado global, ids del watchdog
+│   ├── app_shared.h          # Costura entre módulos: globals `extern` y utilidades comunes
+│   ├── logic.c / logic.h     # Funciones puras (sparklines, barras, umbrales) con tests
+│   ├── main.c                # Orquestador: sensores, monitor, alarmas, stats, sync, init y main()
+│   ├── watchdog.c / watchdog.h    # Latidos de cada tarea y revisión periódica (vWatchdogBeat)
+│   ├── logger_csv.c / logger_csv.h # Escritura y rotación de readings.csv y events.csv
+│   ├── http_server.c / http_server.h # Servidor HTTP: dashboard en HTML y métricas en JSON
+│   ├── dashboard.c / dashboard.h  # Pintado ANSI del dashboard (barras, sparklines, CPU por tarea)
+│   └── demos.c / demos.h     # Teclado (vCommandTask) y demos: inversión, prioridades, vigía, presión
 ├── tests/test_logic.c    # Tests unitarios (ctest)
 ├── tools/plot_csv.py     # Gráfica SVG de readings.csv sin dependencias
 └── docs/

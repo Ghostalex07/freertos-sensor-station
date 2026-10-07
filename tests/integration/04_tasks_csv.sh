@@ -43,7 +43,7 @@ else
 fi
 
 # 3) readings.csv: cabecera, >=3 filas y campos validos
-#    (el logger escribe el nombre del sensor: temperatura/humedad, ver main.c)
+#    (el logger escribe el nombre del sensor: temperatura/humedad, ver src/main.c)
 wait_count '^[0-9]+,' readings.csv 3 5 >/dev/null 2>&1 || true
 readings_err="$(awk -F, '
     NR == 1 {

@@ -51,20 +51,20 @@ else()
 endif()
 
 add_executable(sensor_station
-    main.c
-    logic.c
-    watchdog.c
-    logger_csv.c
-    http_server.c
-    dashboard.c
-    demos.c
+    src/main.c
+    src/logic.c
+    src/watchdog.c
+    src/logger_csv.c
+    src/http_server.c
+    src/dashboard.c
+    src/demos.c
 )
 target_compile_options(sensor_station PRIVATE -Wall -Wextra)
 target_compile_definitions(sensor_station PRIVATE _DEFAULT_SOURCE)
 target_link_libraries(sensor_station freertos_kernel freertos_config Threads::Threads)
 
 enable_testing()
-add_executable(logic_tests tests/test_logic.c logic.c)
+add_executable(logic_tests tests/test_logic.c src/logic.c)
 target_compile_options(logic_tests PRIVATE -Wall -Wextra)
-target_include_directories(logic_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(logic_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_test(NAME logic_tests COMMAND logic_tests)
